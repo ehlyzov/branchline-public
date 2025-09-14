@@ -1,12 +1,25 @@
+# Multiplatform Migration — Status & Plan
+
+This document tracks the Kotlin Multiplatform (KMP) migration for the Branchline language module, decisions we’ve made, and the next actions to keep functional parity with the JVM baseline.
+
+## Current Decisions
+
+- Big numbers: use an `expect`/`actual` facade for big integers/decimals, but do not make the `expect` classes extend `Number`. On JVM, `actual typealias` maps to `java.math.BigInteger/BigDecimal`; on JS, provide simple value classes backed by `Long`/`Double` for now.
+- VM core remains intact. Only minimal adjustments were made to numeric helpers so that `BLBigInt`/`BLBigDec` are treated as numeric values in common code without depending on `Number`.
+- Keep file I/O (bytecode dump) JVM-only for now; common formatting stays pure.
+- No reflection in hot paths; opcode-based dispatch stays as-is and is KMP-friendly.
+
 # What will break (and how to fix)
 
 1. Big numbers
 
-* **Problem:** `java.math.BigInteger/BigDecimal` in `VM.kt` are JVM-only.
-* **Fix:** introduce a multiplatform big-num facade:
+* **Problem:** `java.math.BigInteger/BigDecimal` are JVM-only and cannot be referenced from `commonMain`. Also, `expect … : Number` cannot be satisfied by `actual typealias` on JVM.
+* **Fix (adopted Option A):**
 
-    * `expect class BLBigInt` / `BLBigDec` with `actual` = `java.math` on JVM, and `kotlinx-bignum` (or similar) on JS/Native.
-    * Wrap arithmetic (`addNumbers`, `subtractNumbers`, …) to use this facade and fall back to `Long/Double` fast paths.
+    * Define `expect class BLBigInt` / `BLBigDec` in `commonMain` without extending `Number`.
+    * JVM `actual` remain `typealias` to `java.math` types for zero-overhead interop and unchanged test surface.
+    * JS `actual` are thin value holders (currently `Long`/`Double`-backed) with consistent operators.
+    * In VM numeric helpers, treat `BLBigInt`/`BLBigDec` as numeric via `isBigInt/isBigDec` checks, avoiding assumptions that they are `Number` on all targets. Keep fast paths for primitives.
 
 2. File I/O in the dumper
 
@@ -68,4 +81,12 @@
 
 you can compile for **JS** and **Native**. The rest is performance tuning, not “it won’t compile”.
 
-If you want, I can sketch the `expect/actual` BigNum facade and the tiny changes in `VM.addNumbers`/`subtractNumbers` plus a KMP `build.gradle.kts` skeleton so you can flip on `js(IR)` and `native` targets today.
+## Next fixes (test parity)
+
+The following regressions are tracked and will be fixed without structural VM changes. Each change will be proposed before touching core classes:
+
+- Bytecode dump AIOOBE: instrument `BytecodeDumper` to identify any operand offset mismatches (CALL_HOST/OUTPUT variants) and align with `Instruction.buildFromInstructions` encoding.
+- Inline call suspend/resume underflow: verify operand stack snapshot/restore around `CALL_FN` suspension points. Ensure argument/key preservation and no double frame push/pop on resume.
+- Shared await wiring: confirm `SharedStoreProvider.store` is set and that the stdlib await function is registered for VM execution in tests (JVM-only service/loader or explicit registration).
+
+Once these are resolved, re-run JVM tests and then validate JS compilation of `commonMain` code.
