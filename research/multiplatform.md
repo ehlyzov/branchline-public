@@ -6,6 +6,7 @@ This document tracks the Kotlin Multiplatform (KMP) migration for the Branchline
 
 - Big numbers: use an `expect`/`actual` facade for big integers/decimals, but do not make the `expect` classes extend `Number`. On JVM, `actual typealias` maps to `java.math.BigInteger/BigDecimal`; on JS, provide simple value classes backed by `Long`/`Double` for now.
 - VM core remains intact. Only minimal adjustments were made to numeric helpers so that `BLBigInt`/`BLBigDec` are treated as numeric values in common code without depending on `Number`.
+- Do not move VM to jvmMain. Instead, plan to extract VM into a separate KMP module that keeps `commonMain` sources so future Wasm/JS backends can be compiled without coupling to the main language module. For now, VM stays where it is.
 - Keep file I/O (bytecode dump) JVM-only for now; common formatting stays pure.
 - No reflection in hot paths; opcode-based dispatch stays as-is and is KMP-friendly.
 
@@ -62,6 +63,7 @@ This document tracks the Kotlin Multiplatform (KMP) migration for the Branchline
     * `jsMain` (IR or Wasm JS) → actuals for BigNum (kotlinx-bignum), file I/O stubs (download string, Node fs).
     * `nativeMain` → actuals for BigNum, file I/O (okio or stdio).
 * Keep host-function integrations that call JVM libraries in a **separate JVM-only module** so JS/Native builds don’t see them.
+* Plan a dedicated `language-vm` module with `commonMain` sources (VM, Instruction, Opcode, Bytecode) and a dependency on the core language APIs, avoiding cycles. Defer structural refactor until parity is stable.
 
 # Performance knobs that especially help JS/Native
 
