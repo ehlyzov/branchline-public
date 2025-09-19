@@ -1,0 +1,68 @@
+{
+  "_classes": {
+    "sw:Person": {
+      "iri": "http://starwars.org#Person",
+      "qname": "sw:Person",
+      "propsEffective": {
+        "name": {"$ref": "#/_properties/sw:name"},
+        "darkSide": {"$ref": "#/_properties/sw:darkSide"},
+        "homeworld": {"$ref": "#/_properties/sw:homeworld"},
+        "mentor": {"$ref": "#/_properties/sw:mentor"},
+        "apprentice": {"$ref": "#/_properties/sw:apprentice"}
+      }
+    },
+    "sw:Planet": {
+      "iri": "http://starwars.org#Planet",
+      "qname": "sw:Planet",
+      "propsEffective": {
+        "name": {"$ref": "#/_properties/sw:name"}
+      }
+    }
+  },
+  "_properties": {
+    "sw:name": {
+      "iri": "http://starwars.org#name",
+      "qname": "sw:name",
+      "name": "name",
+      "kind": "datatype",
+      "rangeIri": "http://www.w3.org/2001/XMLSchema#string",
+      "rangeQN": "xsd:string"
+    },
+    "sw:darkSide": {
+      "iri": "http://starwars.org#darkSide",
+      "qname": "sw:darkSide",
+      "name": "darkSide",
+      "kind": "datatype",
+      "rangeIri": "http://www.w3.org/2001/XMLSchema#boolean",
+      "rangeQN": "xsd:boolean"
+    },
+    "sw:homeworld": {
+      "iri": "http://starwars.org#homeworld",
+      "qname": "sw:homeworld",
+      "name": "homeworld",
+      "kind": "object",
+      "rangeIri": "http://starwars.org#Planet",
+      "rangeQN": "sw:Planet"
+    },
+    "sw:mentor": {
+      "iri": "http://starwars.org#mentor",
+      "qname": "sw:mentor",
+      "name": "mentor",
+      "kind": "object",
+      "rangeIri": "http://starwars.org#Person",
+      "rangeQN": "sw:Person",
+      "inverseIri": "http://starwars.org#apprentice",
+      "inverseQN": "sw:apprentice"
+    },
+    "sw:apprentice": {
+      "iri": "http://starwars.org#apprentice",
+      "qname": "sw:apprentice",
+      "name": "apprentice",
+      "kind": "object",
+      "rangeIri": "http://starwars.org#Person",
+      "rangeQN": "sw:Person",
+      "inverseIri": "http://starwars.org#mentor",
+      "inverseQN": "sw:mentor"
+    }
+  }
+}

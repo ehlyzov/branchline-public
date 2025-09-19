@@ -1,0 +1,47 @@
+plugins {
+    id 'org.jetbrains.kotlin.multiplatform'
+}
+
+kotlin {
+    jvm {
+        compilations.all { comp ->
+            comp.kotlinOptions {
+                freeCompilerArgs += ["-Xnested-type-aliases", "-Xexpect-actual-classes"]
+            }
+        }
+        testRuns["test"].executionTask.configure {
+            useJUnitPlatform()
+        }
+    }
+    js(IR) {
+        nodejs()
+    }
+
+    sourceSets {
+        commonMain {
+        }
+        commonTest {
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+            }
+        }
+        jvmTest {
+            dependencies {
+                implementation project(':interpreter')
+                implementation project(':vm')
+                implementation project(':compiler')
+                implementation project(':test-fixtures')
+                implementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2"
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+                implementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
+                implementation 'net.jqwik:jqwik:1.8.5'
+            }
+        }
+        jsTest {
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+                implementation project(':interpreter')
+            }
+        }
+    }
+}
