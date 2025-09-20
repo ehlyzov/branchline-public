@@ -1,14 +1,17 @@
 package v2.ir
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
+import v2.ExecutionEngine
+import v2.testutils.EngineTest
 import v2.testutils.buildRunnerFromProgram
 
-private fun buildExec(src: String): (Map<String, Any?>) -> Any? = buildRunnerFromProgram(src)
+private fun buildExec(src: String, engine: ExecutionEngine): (Map<String, Any?>) -> Any? =
+    buildRunnerFromProgram(src, engine = engine)
 
 class StreamCompilerTest {
 
-    @Test fun `row passes through let output`() {
+    @EngineTest
+    fun `row passes through let output`(engine: ExecutionEngine) {
         val bl = """
             SOURCE row;
             TRANSFORM Sum { stream } {
@@ -17,7 +20,7 @@ class StreamCompilerTest {
             }
         """.trimIndent()
 
-        val exec = buildExec(bl)
+        val exec = buildExec(bl, engine)
         val out = exec(mapOf("a" to 2, "b" to 3))
         assertEquals(mapOf("total" to 5), out)
     }

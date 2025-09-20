@@ -118,9 +118,12 @@ class VMTest {
 
         val eval: (Expr, MutableMap<String, Any?>) -> Any? = { expr, env ->
             when (expr) {
-                is NumberLiteral -> when (expr.value) {
-                    is I32 -> expr.value.v
-                    else -> 0
+                is NumberLiteral -> {
+                    val value = expr.value
+                    when (value) {
+                        is I32 -> value.v
+                        else -> 0
+                    }
                 }
                 is IdentifierExpr -> env[expr.name]
                 else -> null

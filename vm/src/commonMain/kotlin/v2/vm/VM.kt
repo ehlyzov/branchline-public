@@ -183,7 +183,8 @@ class VM(
                     else -> try { Opcode.valueOf(opName) } catch (_: Exception) { null }
                 }
                 if (opcode != null) {
-                    tracer.instructionCounts[opcode] = (tracer.instructionCounts[opcode] ?: 0L) + 1
+                    val key = opcode.name
+                    tracer.instructionCounts[key] = (tracer.instructionCounts[key] ?: 0L) + 1
                 }
             }
 
@@ -968,6 +969,7 @@ class VM(
                 is ExprBody -> listOf(IRReturn(b.expr))
                 is BlockBody -> ToIR(funcs, hostFns).compile(b.block.statements)
             }
+            Compiler.enforceFuncBody(ir)
             Compiler(funcs, hostFns, useLocals = false).compile(ir)
         }
         val env = OverlayEnv(emptyMap())

@@ -1,21 +1,24 @@
 package v2.ir
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import v2.ExecutionEngine
+import v2.testutils.EngineTest
 import v2.testutils.buildRunner
 
-private fun exec(body: String) = buildRunner(body)
+private fun ExecutionEngine.exec(body: String) = buildRunner(body, engine = this)
 
 class ArrayRuntimeTest {
 
-    @Test fun `array literal`() {
-        val f = exec("OUTPUT { arr : [1, 2, row.x] }")
+    @EngineTest
+    fun `array literal`(engine: ExecutionEngine) {
+        val f = engine.exec("OUTPUT { arr : [1, 2, row.x] }")
         assertEquals(mapOf("arr" to listOf(1, 2, 3)), f(mapOf("x" to 3)))
     }
 
-    @Test fun `array comprehension`() {
-        val f = exec(
+    @EngineTest
+    fun `array comprehension`(engine: ExecutionEngine) {
+        val f = engine.exec(
             "OUTPUT { qties : [ item.qty FOR EACH item IN row.items ] }"
         )
         val inRow = mapOf(
@@ -27,34 +30,39 @@ class ArrayRuntimeTest {
         assertEquals(mapOf("qties" to listOf(2, 5)), f(inRow))
     }
 
-    @Test fun `empty array literal`() {
-        val f = exec("OUTPUT { arr : [] }")
+    @EngineTest
+    fun `empty array literal`(engine: ExecutionEngine) {
+        val f = engine.exec("OUTPUT { arr : [] }")
         assertEquals(mapOf("arr" to emptyList<Any?>()), f(emptyMap()))
     }
 
-    @Test fun `heterogeneous array literal`() {
-        val f = exec("""OUTPUT { arr : ["a", 1, TRUE] }""")
+    @EngineTest
+    fun `heterogeneous array literal`(engine: ExecutionEngine) {
+        val f = engine.exec("""OUTPUT { arr : ["a", 1, TRUE] }""")
         assertEquals(mapOf("arr" to listOf("a", 1, true)), f(emptyMap()))
     }
 
-    @Test fun `array of object literals`() {
-        val f = exec("""OUTPUT { arr : [ {a:1}, {b:2} ] }""")
+    @EngineTest
+    fun `array of object literals`(engine: ExecutionEngine) {
+        val f = engine.exec("""OUTPUT { arr : [ {a:1}, {b:2} ] }""")
         assertEquals(
             mapOf("arr" to listOf(mapOf("a" to 1), mapOf("b" to 2))),
             f(emptyMap())
         )
     }
 
-    @Test fun `nested array literal`() {
-        val f = exec("""OUTPUT { arr : [ [1,2], [3] ] }""")
+    @EngineTest
+    fun `nested array literal`(engine: ExecutionEngine) {
+        val f = engine.exec("""OUTPUT { arr : [ [1,2], [3] ] }""")
         assertEquals(
             mapOf("arr" to listOf(listOf(1, 2), listOf(3))),
             f(emptyMap())
         )
     }
 
-    @Test fun `array literal in LET and reuse`() {
-        val f = exec(
+    @EngineTest
+    fun `array literal in LET and reuse`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             LET xs = [1,2,3];
             OUTPUT { arr : xs }
@@ -63,8 +71,9 @@ class ArrayRuntimeTest {
         assertEquals(mapOf("arr" to listOf(1, 2, 3)), f(emptyMap()))
     }
 
-    @Test fun `comprehension with arithmetic and outer LET`() {
-        val f = exec(
+    @EngineTest
+    fun `comprehension with arithmetic and outer LET`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             LET base = 10;
             OUTPUT { sums : [ base + n FOR EACH n IN row.nums ] }
@@ -74,8 +83,9 @@ class ArrayRuntimeTest {
         assertEquals(mapOf("sums" to listOf(11, 12)), f(inRow))
     }
 
-    @Test fun `comprehension mapping to objects`() {
-        val f = exec(
+    @EngineTest
+    fun `comprehension mapping to objects`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             OUTPUT { items : [
                 { sku: item.sku, qty: item.qty * 2 }
@@ -100,8 +110,9 @@ class ArrayRuntimeTest {
         )
     }
 
-    @Test fun `array comprehension with WHERE`() {
-        val f = exec(
+    @EngineTest
+    fun `array comprehension with WHERE`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
         OUTPUT { q: [ it.qty FOR EACH it IN row.items WHERE it.qty > 2 ] }
             """.trimIndent()
@@ -115,8 +126,9 @@ class ArrayRuntimeTest {
         assertEquals(mapOf("q" to listOf(5)), f(inRow))
     }
 
-    @Test fun `comprehension with computed property in object`() {
-        val f = exec(
+    @EngineTest
+    fun `comprehension with computed property in object`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             OUTPUT { arr : [
                 { [ item.sku ] : item.qty }
@@ -141,20 +153,23 @@ class ArrayRuntimeTest {
         )
     }
 
-    @Test fun `comprehension over empty list`() {
-        val f = exec("""OUTPUT { xs : [ x FOR EACH x IN row.list ] }""")
+    @EngineTest
+    fun `comprehension over empty list`(engine: ExecutionEngine) {
+        val f = engine.exec("""OUTPUT { xs : [ x FOR EACH x IN row.list ] }""")
         assertEquals(mapOf("xs" to emptyList<Any?>()), f(mapOf("list" to emptyList<Any?>())))
     }
 
-    @Test fun `comprehension source is not a list - error`() {
-        val f = exec("""OUTPUT { xs : [ x FOR EACH x IN row.notList ] }""")
+    @EngineTest
+    fun `comprehension source is not a list - error`(engine: ExecutionEngine) {
+        val f = engine.exec("""OUTPUT { xs : [ x FOR EACH x IN row.notList ] }""")
         assertThrows<IllegalStateException> {
             f(mapOf("notList" to 42))
         }
     }
 
-    @Test fun `nested comprehension - clone matrix`() {
-        val f = exec(
+    @EngineTest
+    fun `nested comprehension - clone matrix`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             OUTPUT { matrix :
               [ [ y FOR EACH y IN xs ] FOR EACH xs IN row.matrix ]
@@ -178,8 +193,9 @@ class ArrayRuntimeTest {
         )
     }
 
-    @Test fun `nested comprehension with arithmetic inside inner`() {
-        val f = exec(
+    @EngineTest
+    fun `nested comprehension with arithmetic inside inner`(engine: ExecutionEngine) {
+        val f = engine.exec(
             """
             OUTPUT { matrix :
               [ [ y * 10 FOR EACH y IN xs ] FOR EACH xs IN row.matrix ]

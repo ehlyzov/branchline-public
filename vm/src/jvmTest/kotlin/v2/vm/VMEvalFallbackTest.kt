@@ -4,6 +4,7 @@ import v2.SharedStateAwaitExpr
 import v2.Token
 import v2.TokenType
 import v2.debug.CollectingTracer
+import v2.debug.TraceEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -26,8 +27,14 @@ class VMEvalFallbackTest {
         assertNull(out)
 
         // Ensure a FALLBACK trace Call/Return pair was emitted
-        val hasFallbackCall = tracer.events.any { it.event is v2.debug.TraceEvent.Call && it.event.kind == "FALLBACK" }
-        val hasFallbackRet = tracer.events.any { it.event is v2.debug.TraceEvent.Return && it.event.kind == "FALLBACK" }
+        val hasFallbackCall = tracer.events.any { timed ->
+            val call = timed.event as? TraceEvent.Call
+            call?.kind == "FALLBACK"
+        }
+        val hasFallbackRet = tracer.events.any { timed ->
+            val ret = timed.event as? TraceEvent.Return
+            ret?.kind == "FALLBACK"
+        }
         assertEquals(true, hasFallbackCall && hasFallbackRet)
 
         // Compile metrics should have at least 1 compile

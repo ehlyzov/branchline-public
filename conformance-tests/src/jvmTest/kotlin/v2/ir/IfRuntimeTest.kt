@@ -1,18 +1,18 @@
 package v2.ir
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import v2.testutils.compileAndRun
+import v2.ExecutionEngine
+import v2.testutils.EngineTest
 import v2.testutils.buildRunner
+import v2.testutils.compileAndRun
 
-private fun exec(body: String) = buildRunner(body)
+private fun exec(body: String, engine: ExecutionEngine) = buildRunner(body, engine = engine)
 
-/* ------------------------------------------------------------- */
 class IfRuntimeTest {
 
-    @Test
-    fun `if else chooses branch`() {
+    @EngineTest
+    fun `if else chooses branch`(engine: ExecutionEngine) {
         val f = exec(
             """
             IF row.x > 0 THEN {
@@ -20,29 +20,29 @@ class IfRuntimeTest {
             } ELSE {
                 OUTPUT { res : "neg" }
             }
-        """
+            """.trimIndent(),
+            engine,
         )
         assertEquals(mapOf("res" to "pos"), f(mapOf("x" to 3)))
         assertEquals(mapOf("res" to "neg"), f(mapOf("x" to -1)))
     }
 
-    @Test
-    fun `if without else may skip output`() {
+    @EngineTest
+    fun `if without else may skip output`(engine: ExecutionEngine) {
         val f = exec(
             """
             IF row.flag THEN {
                 OUTPUT { ok : true }
             }
-        """
+            """.trimIndent(),
+            engine,
         )
         assertEquals(mapOf("ok" to true), f(mapOf("flag" to true)))
-
-        // flag=false  –  ни одного OUTPUT → IllegalStateException
         assertThrows<IllegalStateException> { f(mapOf("flag" to false)) }
     }
 
-    @Test
-    fun `nested if inside loop`() {
+    @EngineTest
+    fun `nested if inside loop`(engine: ExecutionEngine) {
         val f = exec(
             """
             FOR EACH n IN row.nums {
@@ -52,37 +52,39 @@ class IfRuntimeTest {
                     OUTPUT { odd  : n }
                 }
             }
-        """
+            """.trimIndent(),
+            engine,
         )
         val out = f(mapOf("nums" to listOf(1, 2)))
-        assertEquals(
-            listOf(mapOf("odd" to 1), mapOf("even" to 2)),
-            out
-        )
+        assertEquals(listOf(mapOf("odd" to 1), mapOf("even" to 2)), out)
     }
 
-    @Test fun if_expr_returns_value_in_let() {
+    @EngineTest
+    fun if_expr_returns_value_in_let(engine: ExecutionEngine) {
         val out = compileAndRun(
             """
-              LET a = null; 
+              LET a = null;
               LET b = 7;
               LET x = IF a == null THEN b ELSE a;
               OUTPUT { x: x };
-            """.trimIndent()
+            """.trimIndent(),
+            engine = engine,
         ) as Map<*, *>
         assertEquals(7, out["x"])
     }
 
-    @Test fun if_body_side_effects_are_kept() {
+    @EngineTest
+    fun if_body_side_effects_are_kept(engine: ExecutionEngine) {
         val out = compileAndRun(
             """
               LET acc = { ok: true, errs: [] };
               IF true THEN {
                 SET acc.ok = false;
                 APPEND TO acc.errs "e1" INIT [];
-              } ELSE { /* no-op */ }
+              } ELSE { }
               OUTPUT { ok: acc.ok, errs: acc.errs };
-            """.trimIndent()
+            """.trimIndent(),
+            engine = engine,
         ) as Map<*, *>
         assertEquals(false, out["ok"])
         assertEquals(listOf("e1"), out["errs"])

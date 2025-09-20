@@ -3,8 +3,7 @@ package v2.conformance
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import v2.*
-import v2.ir.IROutput
-import v2.ir.buildRunnerFromIRMP
+import v2.ir.*
 
 private fun tok(t: TokenType) = Token(t, t.name, 1, 1)
 
