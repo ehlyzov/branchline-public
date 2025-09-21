@@ -299,7 +299,8 @@ data class Bytecode(
     val objKeyOperandOffsets: IntArray = IntArray(0),
     val constOperandOffsets: IntArray = IntArray(0),
     val constants: List<Any?> = emptyList(),
-    val debugInfo: Map<Int, String> = emptyMap()
+    val debugInfo: Map<Int, String> = emptyMap(),
+    val traceMetadata: TraceMetadata = TraceMetadata(),
 
 ) {
 
@@ -414,6 +415,7 @@ data class Bytecode(
             instructions: List<Instruction>,
             constants: List<Any?> = emptyList(),
             debugInfo: Map<Int, String> = emptyMap(),
+            traceMetadata: TraceMetadata = TraceMetadata(),
         ): Bytecode {
             val (ops, arrays) = buildFromInstructions(instructions, constants, debugInfo)
             return Bytecode(
@@ -428,6 +430,7 @@ data class Bytecode(
                 constOperandOffsets = arrays.constOperandOffsets,
                 constants = arrays.constants,
                 debugInfo = arrays.debugInfo,
+                traceMetadata = traceMetadata,
             )
         }
         private data class BuildArrays(

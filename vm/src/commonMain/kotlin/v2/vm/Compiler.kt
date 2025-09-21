@@ -3,6 +3,10 @@ package v2.vm
 import v2.*
 import v2.ir.*
 import v2.vm.Instruction.*
+import v2.vm.PathSegmentMeta
+import v2.vm.PathWriteMeta
+import v2.vm.PathWriteOp
+import v2.vm.TraceMetadata
 import kotlin.concurrent.Volatile
 
 /**
@@ -47,6 +51,9 @@ class Compiler(
     private val instructions = mutableListOf<Instruction>()
     private val constants = mutableListOf<Any?>()
     private val debugInfo = mutableMapOf<Int, String>()
+    private val enterEvents = mutableMapOf<Int, MutableList<IRNode>>()
+    private val exitEvents = mutableMapOf<Int, MutableList<IRNode>>()
+    private val pathWrites = mutableMapOf<Int, PathWriteMeta>()
 
     // Jump table for control flow
     private val jumpTable = mutableMapOf<String, Int>()
@@ -67,6 +74,9 @@ class Compiler(
         instructions.clear()
         constants.clear()
         debugInfo.clear()
+        enterEvents.clear()
+        exitEvents.clear()
+        pathWrites.clear()
         jumpTable.clear()
         unresolvedJumps.clear()
         localIndexByName.clear()
@@ -83,10 +93,17 @@ class Compiler(
         // Peephole optimize
         val optimized = optimize(instructions)
 
+        val metadata = TraceMetadata(
+            enterEvents = remapEventMap(enterEvents, optimized.indexMap),
+            exitEvents = remapEventMap(exitEvents, optimized.indexMap),
+            pathWrites = remapPathWrites(pathWrites, optimized.indexMap),
+        )
+
         return Bytecode.fromInstructions(
-            instructions = optimized,
+            instructions = optimized.instructions,
             constants = constants.toList(),
-            debugInfo = debugInfo.toMap()
+            debugInfo = debugInfo.toMap(),
+            traceMetadata = metadata,
         )
     }
 
@@ -94,6 +111,7 @@ class Compiler(
      * Compile a single IR node
      */
     private fun compileNode(node: IRNode) {
+        val startIndex = instructions.size
         when (node) {
             is IRLet -> compileLet(node)
             is IRSet -> compileSet(node)
@@ -109,6 +127,13 @@ class Compiler(
             is IRReturn -> compileReturn(node)
             is IRAbort -> compileAbort(node)
             is IRExprStmt -> compileExprStmt(node)
+        }
+        if (instructions.size > startIndex) {
+            val enterList = enterEvents.getOrPut(startIndex) { mutableListOf() }
+            enterList.add(node)
+            val endIndex = instructions.lastIndex
+            val exitList = exitEvents.getOrPut(endIndex) { mutableListOf() }
+            exitList.add(node)
         }
     }
 
@@ -183,15 +208,19 @@ class Compiler(
             emit(LOAD_VAR(root))
             emit(SWAP)
             emit(SET_STATIC(key))
-            if (useLocals && localIndexByName.containsKey(root)) {
-                emit(DUP)
-                emit(STORE_VAR(root))
-                emit(STORE_LOCAL(localIndexByName[root]!!))
-            } else emit(STORE_VAR(root))
+            val storeIndex = emitStoreRoot(root)
+            recordPathWrite(
+                storeIndex,
+                PathWriteMeta(
+                    op = PathWriteOp.SET,
+                    root = root,
+                    segments = listOf(PathSegmentMeta.Static(key)),
+                )
+            )
             Metrics.setFastPathInstr += (instructions.size - before)
             return
         }
-        // General path (not implemented)
+        // General path
         compileExpr(node.value)
         compileAccessExprForSet(node.target)
         Metrics.setGeneralInstr += (instructions.size - before)
@@ -234,11 +263,15 @@ class Compiler(
             emit(LOAD_VAR(root))
             emit(SWAP)
             emit(SET_STATIC(key))
-            if (useLocals && localIndexByName.containsKey(root)) {
-                emit(DUP)
-                emit(STORE_VAR(root))
-                emit(STORE_LOCAL(localIndexByName[root]!!))
-            } else emit(STORE_VAR(root))
+            val storeIndex = emitStoreRoot(root)
+            recordPathWrite(
+                storeIndex,
+                PathWriteMeta(
+                    op = PathWriteOp.APPEND,
+                    root = root,
+                    segments = listOf(PathSegmentMeta.Static(key)),
+                )
+            )
             Metrics.setFastPathInstr += (instructions.size - before)
             return
         }
@@ -274,11 +307,17 @@ class Compiler(
         emit(COALESCE)
         emit(LOAD_VAR(valVar))
         emit(APPEND)
-        if (useLocals && localIndexByName.containsKey(node.name)) {
-            emit(DUP)
-            emit(STORE_VAR(node.name))
-            emit(STORE_LOCAL(localIndexByName[node.name]!!))
-        } else emit(STORE_VAR(node.name))
+        val storeIndex = emitStoreRoot(node.name)
+        recordPathWrite(
+            storeIndex,
+            PathWriteMeta(
+                op = PathWriteOp.APPEND,
+                root = node.name,
+                segments = emptyList(),
+                displayPath = listOf(node.name),
+                directValues = true,
+            )
+        )
     }
 
     private fun compileModify(node: IRModify) {
@@ -301,11 +340,7 @@ class Compiler(
         emit(MODIFY(updateCount))
         if (segs.isEmpty()) {
             // Target is a variable; write back directly
-            if (useLocals && localIndexByName.containsKey(baseName)) {
-                emit(DUP)
-                emit(STORE_VAR(baseName))
-                emit(STORE_LOCAL(localIndexByName[baseName]!!))
-            } else emit(STORE_VAR(baseName))
+            emitStoreRoot(baseName)
         } else {
             // Rebuild to root with updated object now on stack
             rebuildToRoot(baseName, segs, objVars)
@@ -862,7 +897,7 @@ class Compiler(
         baseName: String,
         segs: List<Pair<AccessSeg, String?>>, // full seg list
         objVars: List<String>, // same length as segs, holds parent object at each depth
-    ) {
+    ): Int {
         // Assumes stack top is the updated value for the last segment.
         // Rebuild upwards and store into base variable.
         var currentUpdatedVar: String? = null
@@ -895,18 +930,10 @@ class Compiler(
 
             // Final write back to base
             emit(LOAD_VAR(currentUpdatedVar))
-            if (useLocals && localIndexByName.containsKey(baseName)) {
-                emit(DUP)
-                emit(STORE_VAR(baseName))
-                emit(STORE_LOCAL(localIndexByName[baseName]!!))
-            } else emit(STORE_VAR(baseName))
+            return emitStoreRoot(baseName)
         } else {
             // Path has single segment; we directly wrote it? Not here. This branch shouldn't be used.
-            if (useLocals && localIndexByName.containsKey(baseName)) {
-                emit(DUP)
-                emit(STORE_VAR(baseName))
-                emit(STORE_LOCAL(localIndexByName[baseName]!!))
-            } else emit(STORE_VAR(baseName))
+            return emitStoreRoot(baseName)
         }
     }
 
@@ -922,17 +949,29 @@ class Compiler(
             val (seg, dyn) = segs[0]
             loadKey(seg, dyn)
             setWithKeyAtTop(seg)
-            if (useLocals && localIndexByName.containsKey(baseName)) {
-                emit(DUP)
-                emit(STORE_VAR(baseName))
-                emit(STORE_LOCAL(localIndexByName[baseName]!!))
-            } else emit(STORE_VAR(baseName))
+            val storeIndex = emitStoreRoot(baseName)
+            recordPathWrite(
+                storeIndex,
+                PathWriteMeta(
+                    op = PathWriteOp.SET,
+                    root = baseName,
+                    segments = toPathSegments(segs),
+                )
+            )
             return
         }
 
         val objVars = loadChainObjects(baseName, segs)
-        // Now stack top is the value to set; rebuild upward
-        rebuildToRoot(baseName, segs, objVars)
+        // Now stack top is the value to set; rebuild upward and record metadata
+        val storeIndex = rebuildToRoot(baseName, segs, objVars)
+        recordPathWrite(
+            storeIndex,
+            PathWriteMeta(
+                op = PathWriteOp.SET,
+                root = baseName,
+                segments = toPathSegments(segs),
+            )
+        )
     }
 
     private fun compileAccessExprForAppend(target: AccessExpr, initProvided: Boolean) {
@@ -965,7 +1004,15 @@ class Compiler(
         emit(APPEND)
 
         // Rebuild to root with updated array on stack
-        rebuildToRoot(baseName, segs, objVars)
+        val storeIndex = rebuildToRoot(baseName, segs, objVars)
+        recordPathWrite(
+            storeIndex,
+            PathWriteMeta(
+                op = PathWriteOp.APPEND,
+                root = baseName,
+                segments = toPathSegments(segs),
+            )
+        )
     }
 
     private fun compileAccessExprForModify(expr: AccessExpr): Triple<String, List<Pair<AccessSeg, String?>>, List<String>> {
@@ -997,6 +1044,35 @@ class Compiler(
         is I64 -> value.v
         is IBig -> value.v
         is Dec -> value.v
+    }
+
+    private fun emitStoreRoot(baseName: String): Int {
+        val localIndex = localIndexByName[baseName]
+        val hasLocal = useLocals && localIndex != null
+        if (hasLocal) emit(DUP)
+        emit(STORE_VAR(baseName))
+        val storeIndex = instructions.lastIndex
+        if (hasLocal) emit(STORE_LOCAL(localIndex!!))
+        return storeIndex
+    }
+
+    private fun recordPathWrite(storeIndex: Int, meta: PathWriteMeta) {
+        pathWrites[storeIndex] = meta
+    }
+
+    private fun toPathSegments(segs: List<Pair<AccessSeg, String?>>): List<PathSegmentMeta> {
+        if (segs.isEmpty()) return emptyList()
+        val out = ArrayList<PathSegmentMeta>(segs.size)
+        for ((seg, dynName) in segs) {
+            when (seg) {
+                is AccessSeg.Static -> out.add(PathSegmentMeta.Static(seg.key))
+                is AccessSeg.Dynamic -> {
+                    val temp = dynName ?: error("Dynamic segment missing temp variable")
+                    out.add(PathSegmentMeta.Dynamic(temp))
+                }
+            }
+        }
+        return out
     }
 
     // === Code Generation Helpers ===
@@ -1058,29 +1134,64 @@ class Compiler(
     /**
      * Simple peephole optimization to remove no-ops and redundant patterns.
      */
-    private fun optimize(ins: List<Instruction>): List<Instruction> {
+    private data class OptimizedProgram(
+        val instructions: List<Instruction>,
+        val indexMap: IntArray,
+    )
+
+    private fun optimize(ins: List<Instruction>): OptimizedProgram {
         val out = ArrayList<Instruction>(ins.size)
+        val indexMap = IntArray(ins.size) { -1 }
         var i = 0
         while (i < ins.size) {
             val a = ins[i]
-            val b = if (i + 1 < ins.size) ins[i + 1] else null
-            // Elide PUSH(x); POP
-            if (a is PUSH && b === POP) {
-                i += 2
-                continue
+            if (i + 1 < ins.size) {
+                val b = ins[i + 1]
+                // Elide PUSH(x); POP
+                if (a is PUSH && b === POP) {
+                    i += 2
+                    continue
+                }
+                // Elide DUP; POP
+                if (a === DUP && b === POP) {
+                    i += 2
+                    continue
+                }
+                // Elide SWAP; SWAP
+                if (a === SWAP && b === SWAP) {
+                    i += 2
+                    continue
+                }
             }
-            // Elide DUP; POP
-            if (a === DUP && b === POP) {
-                i += 2
-                continue
-            }
-            // Elide SWAP; SWAP
-            if (a === SWAP && b === SWAP) {
-                i += 2
-                continue
-            }
+            indexMap[i] = out.size
             out.add(a)
             i += 1
+        }
+        return OptimizedProgram(out, indexMap)
+    }
+
+    private fun <T> remapEventMap(source: Map<Int, MutableList<T>>, indexMap: IntArray): Map<Int, List<T>> {
+        if (source.isEmpty()) return emptyMap()
+        val out = mutableMapOf<Int, MutableList<T>>()
+        for ((oldIndex, events) in source) {
+            if (oldIndex < 0 || oldIndex >= indexMap.size) continue
+            val newIndex = indexMap[oldIndex]
+            if (newIndex < 0) continue
+            val bucket = out.getOrPut(newIndex) { mutableListOf() }
+            bucket.addAll(events)
+        }
+        if (out.isEmpty()) return emptyMap()
+        return out.mapValues { (_, value) -> value.toList() }
+    }
+
+    private fun remapPathWrites(source: Map<Int, PathWriteMeta>, indexMap: IntArray): Map<Int, PathWriteMeta> {
+        if (source.isEmpty()) return emptyMap()
+        val out = mutableMapOf<Int, PathWriteMeta>()
+        for ((oldIndex, meta) in source) {
+            if (oldIndex < 0 || oldIndex >= indexMap.size) continue
+            val newIndex = indexMap[oldIndex]
+            if (newIndex < 0) continue
+            out[newIndex] = meta
         }
         return out
     }

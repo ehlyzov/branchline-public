@@ -61,6 +61,11 @@ class VM(
     // Track which bytecode the host index table was prepared for
     private var hostIndexPreparedFor: Bytecode? = null
     private val outputs = ArrayList<Map<Any, Any?>>()
+    private var enterEvents: Map<Int, List<IRNode>> = emptyMap()
+    private var exitEvents: Map<Int, List<IRNode>> = emptyMap()
+    private var pathWrites: Map<Int, PathWriteMeta> = emptyMap()
+    private var activePc: Int = -1
+    private val pathScratch = ArrayList<Any>(8)
 
     // Exception handling
     private val tryStack = ArrayDeque<TryFrame>()
@@ -90,6 +95,14 @@ class VM(
         }
     }
 
+    private fun loadTraceMetadata(bytecode: Bytecode) {
+        val meta = bytecode.traceMetadata
+        enterEvents = meta.enterEvents
+        exitEvents = meta.exitEvents
+        pathWrites = meta.pathWrites
+        activePc = -1
+    }
+
     /**
      * Execute bytecode with the given environment
      */
@@ -97,6 +110,7 @@ class VM(
         this.bytecode = bytecode
         this.environment = env
         this.pc = 0
+        loadTraceMetadata(bytecode)
 
         stack.clear()
         callStack.clear()
@@ -124,6 +138,7 @@ class VM(
         this.bytecode = bytecode
         this.environment = env
         this.pc = 0
+        loadTraceMetadata(bytecode)
         stack.clear()
         callStack.clear()
         tryStack.clear()
@@ -171,8 +186,12 @@ class VM(
      */
     private fun run(limit: Int = Int.MAX_VALUE): Any? {
         var steps = 0
-        while (pc < bytecode.size() && steps < limit) {
-            val instruction = bytecode.getInstruction(pc)
+        val size = bytecode.size()
+        while (pc < size && steps < limit) {
+            val currentPc = pc
+            emitEnterEventsAt(currentPc)
+
+            val instruction = bytecode.getInstruction(currentPc)
             val tracer = currentTracer()
             val opName = instruction::class.simpleName ?: "?"
             if (tracer is CollectingTracer) {
@@ -192,8 +211,11 @@ class VM(
                 tracer.on(TraceEvent.Call("STEP", opName, emptyList()))
             }
 
+            var executed = false
+            activePc = currentPc
             try {
                 executeInstruction(instruction)
+                executed = true
                 if (tracer?.opts?.step == true) {
                     tracer.on(TraceEvent.Return("STEP", opName, peekOrNull()))
                 }
@@ -202,6 +224,12 @@ class VM(
                     tracer.on(TraceEvent.Error("VM step ${instruction::class.simpleName}", e))
                 }
                 if (!handleException(e)) throw e
+            } finally {
+                activePc = -1
+            }
+
+            if (executed) {
+                emitExitEventsAt(currentPc)
             }
 
             pc++
@@ -245,12 +273,7 @@ class VM(
                 emitVarRead(instruction.name, value)
             }
 
-            is Instruction.STORE_VAR -> {
-                val value = pop()
-                val old = environment[instruction.name]
-                environment[instruction.name] = value
-                emitVarWrite(instruction.name, old, value)
-            }
+            is Instruction.STORE_VAR -> storeVar(instruction.name)
 
             is Instruction.LOAD_SCOPE -> {
                 val value = environment[instruction.name]
@@ -392,13 +415,7 @@ class VM(
                 push(value)
                 emitVarRead(name, value)
             }
-            Opcode.STORE_VAR -> {
-                val name = bytecode.getStringOperand(pc)
-                val value = pop()
-                val old = environment[name]
-                environment[name] = value
-                emitVarWrite(name, old, value)
-            }
+            Opcode.STORE_VAR -> storeVar(bytecode.getStringOperand(pc))
             Opcode.LOAD_SCOPE -> {
                 val name = bytecode.getStringOperand(pc)
                 val value = environment[name]
@@ -1118,7 +1135,9 @@ class VM(
         }
         push(obj)
         @Suppress("UNCHECKED_CAST")
-        outputs.add(obj as Map<Any, Any?>)
+        val output = obj as Map<Any, Any?>
+        outputs.add(output)
+        emitOutputEvent(output)
     }
     private fun createOutput1() {
         val value = pop()
@@ -1127,7 +1146,9 @@ class VM(
         obj[key!!] = value
         push(obj)
         @Suppress("UNCHECKED_CAST")
-        outputs.add(obj as Map<Any, Any?>)
+        val output = obj as Map<Any, Any?>
+        outputs.add(output)
+        emitOutputEvent(output)
     }
     private fun createOutput2() {
         val v2 = pop()
@@ -1139,7 +1160,9 @@ class VM(
         obj[k2!!] = v2
         push(obj)
         @Suppress("UNCHECKED_CAST")
-        outputs.add(obj as Map<Any, Any?>)
+        val output = obj as Map<Any, Any?>
+        outputs.add(output)
+        emitOutputEvent(output)
     }
 
     private fun normalizeOutputs(): Any? = when (outputs.size) {
@@ -1598,6 +1621,151 @@ class VM(
 
     private fun emitLineNumber(lineNumber: Int) {
         // currentTracer()?.on(VMTraceEvent.VMLine(lineNumber))
+    }
+
+    private fun storeVar(name: String) {
+        val value = pop()
+        val old = environment[name]
+        environment[name] = value
+        emitVarWrite(name, old, value)
+        emitPathWriteIfNeeded(activePc, name, old, value)
+    }
+
+    private fun emitEnterEventsAt(pc: Int) {
+        val events = enterEvents[pc] ?: return
+        val tracer = currentTracer() ?: return
+        if (!tracer.opts.step) return
+        for (node in events) tracer.on(TraceEvent.Enter(node))
+    }
+
+    private fun emitExitEventsAt(pc: Int) {
+        val events = exitEvents[pc] ?: return
+        val tracer = currentTracer() ?: return
+        if (!tracer.opts.step) return
+        for (node in events) tracer.on(TraceEvent.Exit(node))
+    }
+
+    private fun emitPathWriteIfNeeded(pc: Int, storeName: String, oldRoot: Any?, newRoot: Any?) {
+        if (pc < 0) return
+        val meta = pathWrites[pc] ?: return
+        if (meta.root != storeName) return
+        val tracer = currentTracer() ?: return
+        val path: List<Any> = meta.displayPath?.let { ArrayList(it) } ?: resolvePath(meta, oldRoot, newRoot)
+        val oldValue = if (meta.directValues) oldRoot else readAtPath(oldRoot, path)
+        val newValue = if (meta.directValues) newRoot else readAtPath(newRoot, path)
+        tracer.on(TraceEvent.PathWrite(meta.op.name, meta.root, path, oldValue, newValue))
+    }
+
+    private fun resolvePath(meta: PathWriteMeta, oldRoot: Any?, newRoot: Any?): List<Any> {
+        if (meta.segments.isEmpty()) return emptyList()
+        pathScratch.clear()
+        var currentOld: Any? = oldRoot
+        var currentNew: Any? = newRoot
+        for (segment in meta.segments) {
+            val key: Any = when (segment) {
+                is PathSegmentMeta.Static -> unwrapKey(segment.key)
+                is PathSegmentMeta.Dynamic -> {
+                    val raw = environment[segment.tempName]
+                    val container = when {
+                        currentOld is Map<*, *> || currentOld is List<*> -> currentOld
+                        currentNew is Map<*, *> || currentNew is List<*> -> currentNew
+                        else -> null
+                    }
+                    when (container) {
+                        is Map<*, *> -> normalizeMapKey(raw)
+                        is List<*> -> normalizeListIndex(raw, container.size)
+                        else -> raw ?: error("Dynamic path segment '${segment.tempName}' resolved to null")
+                    }
+                }
+            }
+            pathScratch.add(key)
+            currentOld = childValue(currentOld, key)
+            currentNew = childValue(currentNew, key)
+        }
+        val resolved = ArrayList<Any>(pathScratch)
+        pathScratch.clear()
+        return resolved
+    }
+
+    private fun readAtPath(root: Any?, path: List<Any>): Any? {
+        if (path.isEmpty()) return root
+        var current: Any? = root
+        for (segment in path) {
+            current = childValue(current, segment)
+        }
+        return current
+    }
+
+    private fun childValue(container: Any?, key: Any): Any? {
+        return when (container) {
+            is Map<*, *> -> container[key]
+            is List<*> -> {
+                val idx = when (key) {
+                    is Int -> key
+                    is Long -> {
+                        if (key < 0L || key > Int.MAX_VALUE.toLong()) return null
+                        key.toInt()
+                    }
+                    is BLBigInt -> {
+                        if (key.signum() < 0 || key > blBigIntOfLong(Int.MAX_VALUE.toLong())) return null
+                        key.toInt()
+                    }
+                    else -> return null
+                }
+                if (idx < 0 || idx >= container.size) return null
+                container[idx]
+            }
+            else -> null
+        }
+    }
+
+    private fun normalizeMapKey(value: Any?): Any {
+        return when (value) {
+            is String -> value
+            is Int -> {
+                require(value >= 0) { "Object key must be non-negative" }
+                value
+            }
+            is Long -> {
+                require(value >= 0L) { "Object key must be non-negative" }
+                value
+            }
+            else -> if (isBigInt(value)) {
+                val bi = value as BLBigInt
+                require(bi.signum() >= 0) { "Object key must be non-negative" }
+                bi
+            } else {
+                value ?: error("Object key must be string or non-negative integer")
+            }
+        }
+    }
+
+    private fun normalizeListIndex(value: Any?, size: Int): Int {
+        return when (value) {
+            is Int -> {
+                require(value in 0 until size) { "Index $value out of bounds 0..${size - 1}" }
+                value
+            }
+            is Long -> {
+                require(value in 0..Int.MAX_VALUE.toLong()) { "Index $value out of bounds" }
+                val idx = value.toInt()
+                require(idx in 0 until size) { "Index $idx out of bounds 0..${size - 1}" }
+                idx
+            }
+            else -> if (isBigInt(value)) {
+                val bi = value as BLBigInt
+                require(bi.signum() >= 0 && bi <= blBigIntOfLong(Int.MAX_VALUE.toLong())) { "Index $bi out of bounds" }
+                val idx = bi.toInt()
+                require(idx in 0 until size) { "Index $idx out of bounds 0..${size - 1}" }
+                idx
+            } else {
+                error("List index must be integer")
+            }
+        }
+    }
+
+    private fun emitOutputEvent(obj: Map<Any, Any?>) {
+        currentTracer()?.on(TraceEvent.Output(obj))
     }
 
     private fun emitVarRead(name: String, value: Any?) {
