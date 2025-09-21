@@ -1,6 +1,7 @@
 package v2.ir
 
 import v2.FuncDecl
+import v2.Mode
 import v2.TransformDecl
 
 actual class TransformRegistry actual constructor(
@@ -12,19 +13,17 @@ actual class TransformRegistry actual constructor(
 
     actual fun get(name: String): (Map<String, Any?>) -> Any? =
         cache.getOrPut(name) {
-            val decl = transforms[name]
-                ?: error("Transform '$name' not found")
-            // Compile TransformDecl body to IR and execute via Exec (interpreter-only)
+            val decl = transforms[name] ?: error("Transform '$name' not found")
+            require(decl.mode == Mode.STREAM) { "Only stream mode yet" }
             val ir = ToIR(funcs, hostFns).compile(decl.body.statements)
-            val reg: TransformRegistry = this
-            val evalFn: (v2.Expr, MutableMap<String, Any?>) -> Any? = makeEval(hostFns, funcs, reg)
-            val executor = Exec(ir, evalFn)
+            val evalFn = makeEval(hostFns, funcs, this)
+            val exec = Exec(ir, evalFn)
             val runner: (Map<String, Any?>) -> Any? = { input: Map<String, Any?> ->
                 val env = HashMap<String, Any?>().apply {
                     this["row"] = input
                     putAll(input)
                 }
-                val produced = executor.run(env)
+                val produced = exec.run(env)
                 produced ?: error("No OUTPUT")
             }
             runner

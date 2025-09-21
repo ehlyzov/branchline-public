@@ -18,8 +18,8 @@ class TraceReportInstructionTest {
         )
         vm.execute(bytecode)
         val rep = TraceReport.from(tracer)
-        assertEquals(2L, rep.instructions[Opcode.PUSH])
-        assertEquals(1L, rep.instructions[Opcode.OUTPUT])
+        assertEquals(2L, rep.instructions["PUSH"])
+        assertEquals(1L, rep.instructions["OUTPUT"])
         assertEquals(3.0, TraceReport.instructionsPerRow(rep), 0.0)
     }
 }

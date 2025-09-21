@@ -17,6 +17,7 @@ kotlin {
         jvmMain {
             dependencies {
                 implementation project(':interpreter')
+                implementation project(':vm')
                 implementation 'org.jetbrains.kotlin:kotlin-test'
                 implementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
             }
