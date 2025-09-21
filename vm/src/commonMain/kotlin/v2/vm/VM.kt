@@ -54,7 +54,6 @@ class VM(
     private lateinit var bytecode: Bytecode
     private var environment = mutableMapOf<String, Any?>()
     private var locals: Array<Any?> = arrayOf()
-    private val lambdaVm: VM by lazy { VM(hostFns, funcs, tracer) }
     private val funcBytecode = HashMap<String, Bytecode>()
     private var lastSuspension: Any? = null
     private val hostByIndex = ArrayList<((List<Any?>) -> Any?)?>()
@@ -106,6 +105,12 @@ class VM(
     /**
      * Execute bytecode with the given environment
      */
+    init {
+        for ((name, decl) in funcs) {
+            funcBytecode[name] = compileFunctionBytecode(decl)
+        }
+    }
+
     fun execute(bytecode: Bytecode, env: MutableMap<String, Any?> = mutableMapOf()): Any? {
         this.bytecode = bytecode
         this.environment = env
@@ -184,14 +189,17 @@ class VM(
     /**
      * Main execution loop
      */
-    private fun run(limit: Int = Int.MAX_VALUE): Any? {
+    private fun run(limit: Int = Int.MAX_VALUE, targetCallDepth: Int = -1): Any? {
         var steps = 0
-        val size = bytecode.size()
-        while (pc < size && steps < limit) {
+        while (steps < limit) {
+            val currentBytecode = bytecode
+            val size = currentBytecode.size()
+            if (pc < 0) pc = 0
+            if (pc >= size) break
             val currentPc = pc
             emitEnterEventsAt(currentPc)
 
-            val instruction = bytecode.getInstruction(currentPc)
+            val instruction = currentBytecode.getInstruction(currentPc)
             val tracer = currentTracer()
             val opName = instruction::class.simpleName ?: "?"
             if (tracer is CollectingTracer) {
@@ -223,7 +231,13 @@ class VM(
                 if (tracer?.opts?.step == true) {
                     tracer.on(TraceEvent.Error("VM step ${instruction::class.simpleName}", e))
                 }
-                if (!handleException(e)) throw e
+                val handled = handleException(e)
+                if (!handled) {
+                    if (e !is VMException.Abort) {
+                        emitCallError(e)
+                    }
+                    throw e
+                }
             } finally {
                 activePc = -1
             }
@@ -233,6 +247,9 @@ class VM(
             }
 
             pc++
+            if (targetCallDepth >= 0 && callStack.size <= targetCallDepth) {
+                break
+            }
             steps++
         }
         return if (stack.isEmpty()) null else stack.peek()
@@ -898,14 +915,78 @@ class VM(
         out.addAll(right)
         push(out)
     }
+    private enum class CallMode { SCHEDULED, IMMEDIATE }
+
+    private fun compileFunctionBytecode(func: FuncDecl): Bytecode {
+        val ir: List<IRNode> = when (val body = func.body) {
+            is ExprBody -> listOf(IRReturn(body.expr))
+            is BlockBody -> ToIR(funcs, hostFns).compile(body.block.statements)
+        }
+        Compiler.enforceFuncBody(ir)
+        return Compiler(funcs, hostFns, useLocals = false).compile(ir)
+    }
+
+    private fun createCallEnvironment(params: List<String>, args: List<Any?>, captured: Map<String, Any?> = emptyMap()): OverlayEnv {
+        val env = OverlayEnv(captured)
+        for ((index, param) in params.withIndex()) {
+            env[param] = args.getOrNull(index)
+        }
+        return env
+    }
+
+    private fun startFunctionCall(
+        kind: String,
+        name: String?,
+        args: List<Any?>,
+        env: OverlayEnv,
+        functionBytecode: Bytecode,
+        returnAddress: Int,
+        mode: CallMode,
+    ) {
+        if (callStack.size >= MAX_CALL_DEPTH) {
+            throw VMException.StackOverflow()
+        }
+        val tracer = currentTracer()
+        val includeTrace = tracer?.opts?.includeCalls == true
+        if (includeTrace) {
+            tracer.on(TraceEvent.Call(kind, name, args))
+        }
+        callStack.push(
+            CallFrame(
+                returnAddress = returnAddress,
+                environment = HashMap(environment),
+                outerBytecode = bytecode,
+                stackSize = stack.size,
+                locals = locals,
+                traceKind = if (includeTrace) kind else null,
+                traceName = if (includeTrace) name else null,
+                emitTraceReturn = includeTrace,
+            ),
+        )
+        environment = env
+        locals = arrayOf()
+        bytecode = functionBytecode
+        loadTraceMetadata(functionBytecode)
+        initHostIndexTable()
+        pc = if (mode == CallMode.IMMEDIATE) 0 else -1
+    }
+
+    private fun emitCallError(e: Exception) {
+        val frame = callStack.peek() ?: return
+        if (!frame.emitTraceReturn || frame.traceKind == null) return
+        val tracer = currentTracer()
+        val name = frame.traceName ?: "<lambda>"
+        tracer?.on(TraceEvent.Error("call ${frame.traceKind} $name", e))
+    }
+
     private fun callFunction(name: String, argCount: Int) {
         val args = ArrayList<Any?>(argCount)
         repeat(argCount) { args.add(pop()) }
 
         environment[name]?.let { value ->
             if (value is LambdaValue) {
-                val result = tracedCall("LAMBDA", name, args) { invokeLambda(value, args) }
-                push(result)
+                val env = createCallEnvironment(value.params, args, value.captured)
+                startFunctionCall("LAMBDA", name, args, env, value.bytecode, pc + 1, CallMode.SCHEDULED)
                 return
             }
         }
@@ -925,51 +1006,10 @@ class VM(
 
         // User-defined function declared in program
         funcs[name]?.let { fd ->
-            val bc = funcBytecode.getOrPut(name) {
-                val ir: List<IRNode> = when (val b = fd.body) {
-                    is ExprBody -> listOf(IRReturn(b.expr))
-                    is BlockBody -> ToIR(funcs, hostFns).compile(b.block.statements)
-                }
-                val c = Compiler(funcs, hostFns)
-                c.compile(ir)
-            }
-            // Functions do not capture outer variables; only parameters are available
-            val env = OverlayEnv(emptyMap())
-            for ((i, param) in fd.params.withIndex()) env[param] = args.getOrNull(i)
-            // Track call frame for snapshotting
-            callStack.push(CallFrame(returnAddress = pc + 1, environment = HashMap(environment), outerBytecode = bytecode, stackSize = stack.size))
-            try {
-                // Continuation support: if we have saved inner snapshot for this CALL, resume it
-                val contKey = "__cont__:$name"
-                val saved = environment[contKey] as? String
-                if (saved != null) {
-                    var inner = restoreFromSnapshot(saved, hostFns, funcs, tracer)
-                    val finished = inner.resume()
-                    if (!finished) {
-                        val next = inner.suspendedSnapshotOrNull()
-                        if (next != null) environment[contKey] = next
-                        val snap = buildSnapshotJson(pc)
-                        throw VMException.Abort(mapOf("__suspended" to true, "snapshot" to snap))
-                    } else {
-                        environment.remove(contKey)
-                        val res = inner.resultOrNull()
-                        push(res)
-                        return
-                    }
-                }
-
-                val result = tracedCall("FUNC", name, args) { lambdaVm.execute(bc, env) }
-                if (result is Map<*, *> && result["__suspended"] == true) {
-                    val innerSnap = result["snapshot"] as? String
-                    if (innerSnap != null) environment[contKey] = innerSnap
-                    val snap = buildSnapshotJson(pc) // resume at CALL
-                    throw VMException.Abort(mapOf("__suspended" to true, "snapshot" to snap))
-                }
-                push(result)
-                return
-            } finally {
-                if (callStack.isNotEmpty()) callStack.pop()
-            }
+            val bc = funcBytecode[name] ?: compileFunctionBytecode(fd).also { funcBytecode[name] = it }
+            val env = createCallEnvironment(fd.params, args)
+            startFunctionCall("FUNC", name, args, env, bc, pc + 1, CallMode.SCHEDULED)
+            return
         }
 
         throw VMException.VariableNotFound(name)
@@ -980,50 +1020,10 @@ class VM(
     private fun callUserFunction(name: String, argCount: Int) {
         val args = ArrayList<Any?>(argCount)
         repeat(argCount) { args.add(pop()) }
-        val f = funcs[name] ?: throw VMException.VariableNotFound(name)
-        val bc = funcBytecode.getOrPut(name) {
-            val ir: List<IRNode> = when (val b = f.body) {
-                is ExprBody -> listOf(IRReturn(b.expr))
-                is BlockBody -> ToIR(funcs, hostFns).compile(b.block.statements)
-            }
-            Compiler.enforceFuncBody(ir)
-            Compiler(funcs, hostFns, useLocals = false).compile(ir)
-        }
-        val env = OverlayEnv(emptyMap())
-        for ((i, param) in f.params.withIndex()) env[param] = args.getOrNull(i)
-        // Track call frame so outer snapshot contains pending call
-        callStack.push(CallFrame(returnAddress = pc + 1, environment = HashMap(environment), outerBytecode = bytecode, stackSize = stack.size))
-
-        try {
-            val contKey = "__cont__:$name"
-            val saved = environment[contKey] as? String
-            if (saved != null) {
-                var inner = restoreFromSnapshot(saved, hostFns, funcs, tracer)
-                val finished = inner.resume()
-                if (!finished) {
-                    val next = inner.suspendedSnapshotOrNull()
-                    if (next != null) environment[contKey] = next
-                    val snap = buildSnapshotJson(pc)
-                    throw VMException.Abort(mapOf("__suspended" to true, "snapshot" to snap))
-                } else {
-                    environment.remove(contKey)
-                    val res = inner.resultOrNull()
-                    push(res)
-                    return
-                }
-            }
-
-            val result = tracedCall("FUNC", name, args) { lambdaVm.execute(bc, env) }
-            if (result is Map<*, *> && result["__suspended"] == true) {
-                val innerSnap = result["snapshot"] as? String
-                if (innerSnap != null) environment[contKey] = innerSnap
-                val snap = buildSnapshotJson(pc) // resume at CALL_FN
-                throw VMException.Abort(mapOf("__suspended" to true, "snapshot" to snap))
-            }
-            push(result)
-        } finally {
-            if (callStack.isNotEmpty()) callStack.pop()
-        }
+        val func = funcs[name] ?: throw VMException.VariableNotFound(name)
+        val bc = funcBytecode[name] ?: compileFunctionBytecode(func).also { funcBytecode[name] = it }
+        val env = createCallEnvironment(func.params, args)
+        startFunctionCall("FUNC", name, args, env, bc, pc + 1, CallMode.SCHEDULED)
     }
 
     private fun callLambda(argCount: Int) {
@@ -1033,11 +1033,8 @@ class VM(
         if (fn !is LambdaValue) {
             throw VMException.TypeMismatch("lambda", fn?.let { it::class.simpleName })
         }
-        val result = tracedCall("LAMBDA", null, args) { invokeLambda(fn, args) }
-        if (result is Map<*, *> && result["__suspended"] == true) {
-            throw VMException.Abort(result)
-        }
-        push(result)
+        val env = createCallEnvironment(fn.params, args, fn.captured)
+        startFunctionCall("LAMBDA", null, args, env, fn.bytecode, pc + 1, CallMode.SCHEDULED)
     }
 
     private fun callHostIndexed(index: Int, name: String, argCount: Int) {
@@ -1094,11 +1091,12 @@ class VM(
     }
 
     private fun invokeLambda(lambda: LambdaValue, args: List<Any?>): Any? {
-        val env = OverlayEnv(lambda.captured)
-        for ((i, param) in lambda.params.withIndex()) {
-            env[param] = args.getOrNull(i)
-        }
-        return lambdaVm.execute(lambda.bytecode, env)
+        val depthBefore = callStack.size
+        val env = createCallEnvironment(lambda.params, args, lambda.captured)
+        val returnAddress = pc
+        startFunctionCall("LAMBDA", null, args, env, lambda.bytecode, returnAddress, CallMode.IMMEDIATE)
+        run(targetCallDepth = depthBefore)
+        return if (stack.isEmpty()) null else pop()
     }
 
     private fun handleReturn(value: Any?): Nothing {
@@ -1110,15 +1108,21 @@ class VM(
         val frame = callStack.pop()
         val outBc = frame.outerBytecode
         val retPc = frame.returnAddress
+        val tracer = currentTracer()
+        if (frame.emitTraceReturn && frame.traceKind != null) {
+            tracer?.on(TraceEvent.Return(frame.traceKind, frame.traceName, value))
+        }
         val outerEnv = frame.environment
         // Restore stack depth to the pre-call size, then push return value
-        while (stack.size > frame.stackSize) stack.pop()
-        // Ensure we didn't lose caller's operands
-        while (stack.size < frame.stackSize) stack.push(null)
+        while (stack.size > frame.stackSize) pop()
+        while (stack.size < frame.stackSize) push(null)
         push(value)
         // Restore environment and bytecode
         this.environment = HashMap(outerEnv)
         this.bytecode = outBc
+        loadTraceMetadata(outBc)
+        initHostIndexTable()
+        this.locals = frame.locals
         // Resume at instruction after CALL_FN
         this.pc = retPc - 1
     }
@@ -1302,6 +1306,10 @@ class VM(
         val env: Map<String, SerializedValue>,
         val outer: SerializedBytecode,
         val stackSize: Int,
+        val locals: List<SerializedValue> = emptyList(),
+        val traceKind: String? = null,
+        val traceName: String? = null,
+        val emitTraceReturn: Boolean = false,
     )
 
     @Serializable
@@ -1324,7 +1332,18 @@ class VM(
             environment.mapValues { (_, v) -> serializeValue(v) },
             stack.toList().map { serializeValue(it) },
             locals = locals.take(locals.size).map { serializeValue(it) },
-            calls = callStack.map { c -> SerializedCall(c.returnAddress, c.environment.mapValues { (_, v) -> serializeValue(v) }, serializeBytecode(c.outerBytecode), c.stackSize) },
+            calls = callStack.map { c ->
+                SerializedCall(
+                    c.returnAddress,
+                    c.environment.mapValues { (_, v) -> serializeValue(v) },
+                    serializeBytecode(c.outerBytecode),
+                    c.stackSize,
+                    locals = c.locals.map { serializeValue(it) },
+                    traceKind = c.traceKind,
+                    traceName = c.traceName,
+                    emitTraceReturn = c.emitTraceReturn,
+                )
+            },
             trys = tryStack.map { t -> SerializedTry(t.catchAddress, t.stackSize, t.startAddress, t.attempts) },
             loops = loopStack.map { l ->
                 SerializedLoop(
@@ -1346,7 +1365,18 @@ class VM(
             environment.mapValues { (_, v) -> serializeValue(v) },
             stack.toList().map { serializeValue(it) },
             locals = locals.take(locals.size).map { serializeValue(it) },
-            calls = callStack.map { c -> SerializedCall(c.returnAddress, c.environment.mapValues { (_, v) -> serializeValue(v) }, serializeBytecode(c.outerBytecode), c.stackSize) },
+            calls = callStack.map { c ->
+                SerializedCall(
+                    c.returnAddress,
+                    c.environment.mapValues { (_, v) -> serializeValue(v) },
+                    serializeBytecode(c.outerBytecode),
+                    c.stackSize,
+                    locals = c.locals.map { serializeValue(it) },
+                    traceKind = c.traceKind,
+                    traceName = c.traceName,
+                    emitTraceReturn = c.emitTraceReturn,
+                )
+            },
             trys = tryStack.map { t -> SerializedTry(t.catchAddress, t.stackSize, t.startAddress, t.attempts) },
             loops = loopStack.map { l ->
                 SerializedLoop(
@@ -1393,9 +1423,21 @@ class VM(
             // Restore call stack
             vm.callStack.clear()
             for (c in snap.calls) {
-                val cenv = c.env.mapValues { (_, v) -> deserializeValue(v) }
+                val cenv = HashMap(c.env.mapValues { (_, v) -> deserializeValue(v) })
                 val outer = deserializeBytecode(c.outer)
-                vm.callStack.push(CallFrame(c.returnPc, cenv, outer, c.stackSize))
+                val localsArray = Array(c.locals.size) { idx -> deserializeValue(c.locals[idx]) }
+                vm.callStack.push(
+                    CallFrame(
+                        c.returnPc,
+                        cenv,
+                        outer,
+                        c.stackSize,
+                        localsArray,
+                        c.traceKind,
+                        c.traceName,
+                        c.emitTraceReturn,
+                    ),
+                )
             }
             // Restore try stack
             vm.tryStack.clear()
@@ -1797,9 +1839,13 @@ class VM(
  */
 private data class CallFrame(
     val returnAddress: Int,
-    val environment: Map<String, Any?>,
+    val environment: MutableMap<String, Any?>,
     val outerBytecode: Bytecode,
     val stackSize: Int,
+    val locals: Array<Any?>,
+    val traceKind: String?,
+    val traceName: String?,
+    val emitTraceReturn: Boolean,
 )
 
 
