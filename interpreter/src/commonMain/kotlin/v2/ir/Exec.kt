@@ -197,8 +197,22 @@ class Exec(
         LinkedHashMap<Any, Any?>().apply {
             fields.forEach { p ->
                 when (p) {
-                    is LiteralProperty -> put(unwrapKey(p.key), eval(p.value, env))
-                    is ComputedProperty -> put(mapKeyFromDynamic(eval(p.keyExpr, env)), eval(p.value, env))
+                    is LiteralProperty -> {
+                        val key = unwrapKey(p.key)
+                        val value = Debug.captureOutputField(key ?: "<key>") {
+                            eval(p.value, env)
+                        }
+                        put(key, value)
+                    }
+
+                    is ComputedProperty -> {
+                        val keyValue = eval(p.keyExpr, env)
+                        val key = mapKeyFromDynamic(keyValue)
+                        val value = Debug.captureOutputField(key ?: "<key>") {
+                            eval(p.value, env)
+                        }
+                        put(key, value)
+                    }
                 }
             }
         }

@@ -113,6 +113,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
     private val depsCalcByVar = mutableMapOf<String, List<CalcStep>>()
     private val exprByVar = mutableMapOf<String, Expr>()
     private val requestedExplains = LinkedHashSet<String>()
+    private val outputValues = LinkedHashMap<String, Any?>()
 
     data class ProvStep(
         val op: String,
@@ -123,6 +124,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
         val new: Any?,
         val calc: List<CalcStep> = emptyList(),
         val debug: List<String> = emptyList(),
+        val sources: List<Pair<String, Any?>> = emptyList(),
     )
 
     // varName -> список шагов происхождения (в порядке появления)
@@ -140,16 +142,57 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
 
     private fun renderLetDebug(
         expr: Expr?,
-        inputs: List<Pair<String, Any?>>,
+        directInputs: List<Pair<String, Any?>>,
+        flattenedInputs: List<Pair<String, Any?>>,
         result: Any?
     ): List<String> {
         if (expr == null) return emptyList()
+
         val valueLookup = LinkedHashMap<String, Any?>()
-        for ((k, v) in inputs) valueLookup[k] = v
+        for ((k, v) in directInputs) valueLookup[k] = v
+        for ((k, v) in flattenedInputs) if (!valueLookup.containsKey(k)) valueLookup[k] = v
         val rendered = renderExprForDebug(expr, valueLookup)
-        if (rendered.isBlank()) return emptyList()
         val rhs = formatDebugValue(result)
-        return listOf("$rendered -> $rhs")
+
+        val lines = ArrayList<String>()
+        val direct = directInputs.ifEmpty { flattenedInputs }
+        if (direct.isNotEmpty()) {
+            direct.forEach { (n, v) ->
+                if (v is Map<*, *> || v is Iterable<*> || v is Array<*>) {
+                    return@forEach
+                }
+                lines += "$n = ${formatDebugValue(v)}"
+            }
+        }
+        if (rendered.isNotBlank()) {
+            lines += "$rendered -> $rhs"
+        }
+        if (lines.isEmpty()) {
+            lines += rhs
+        }
+        return lines
+    }
+
+    private fun renderOutputDebug(
+        name: String,
+        directInputs: List<Pair<String, Any?>>,
+        flattenedInputs: List<Pair<String, Any?>>,
+        result: Any?
+    ): List<String> {
+        val rhs = formatDebugValue(result)
+        val preferredDirect = directInputs.firstOrNull { (_, v) ->
+            when (v) {
+                is Map<*, *> -> false
+                is Iterable<*> -> false
+                is Array<*> -> false
+                else -> true
+            }
+        }
+        val primary = preferredDirect?.first
+            ?: flattenedInputs.firstOrNull()?.first
+            ?: directInputs.firstOrNull()?.first
+            ?: name
+        return listOf("$primary -> $rhs")
     }
 
     private fun renderExprForDebug(expr: Expr, values: Map<String, Any?>): String = when (expr) {
@@ -400,7 +443,8 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                     delta = computeDelta(event.op, event.old, event.new),
                     old = event.old,
                     new = event.new,
-                    calc = calcForStep
+                    calc = calcForStep,
+                    sources = baseInputs
                 )
                 provByRoot.getOrPut(event.root) { mutableListOf() }.add(step)
             }
@@ -464,7 +508,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
             is TraceEvent.Let -> ev.new
             is TraceEvent.Return -> ev.value
             is TraceEvent.PathWrite -> ev.new
-            else -> null
+            else -> outputValues[name]
         }
         val stepsOut = steps.map { it.toMap() }
         return mapOf("var" to name, "final" to finalValue, "steps" to stepsOut)
@@ -481,7 +525,65 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                 else -> Unit
             }
         }
+        keys.addAll(outputValues.keys)
         return keys
+    }
+
+    fun directDependenciesOf(name: String): List<String> {
+        val steps = provByRoot[name] ?: return emptyList()
+        for (i in steps.lastIndex downTo 0) {
+            val step = steps[i]
+            if (step.sources.isNotEmpty()) {
+                if (step.op != "OUTPUT" || steps.all { it.op == "OUTPUT" }) {
+                    return step.sources.map { it.first }
+                }
+            }
+        }
+        return emptyList()
+    }
+
+    fun captureOutputField(name: Any, evaluate: () -> Any?): Any? {
+        val root = name.toString()
+        val frame = CaptureFrame("OUTPUT")
+        val previousEvent = lastByVar[root]
+        val letSteps = if (previousEvent is TraceEvent.Let) buildLetProvenance(root) else emptyList()
+        capStack.addLast(frame)
+        return try {
+            val value = evaluate()
+            outputValues[root] = value
+            val baseInputs = frame.reads.map { it.name to it.value }
+            val (flattenedInputs, flattenedCalc) = flattenInputs(baseInputs)
+            val step = ProvStep(
+                op = "OUTPUT",
+                path = listOf(root),
+                inputs = flattenedInputs,
+                delta = null,
+                old = null,
+                new = value,
+                calc = flattenedCalc,
+                debug = renderOutputDebug(root, baseInputs, flattenedInputs, value),
+                sources = baseInputs
+            )
+            val stepsList = provByRoot.getOrPut(root) { mutableListOf() }
+            if (letSteps.isNotEmpty()) {
+                for (ls in letSteps.reversed()) {
+                    if (stepsList.none { it.op == ls.op && it.path == ls.path }) {
+                        stepsList.add(0, ls)
+                    }
+                }
+            }
+            stepsList.add(step)
+            if (previousEvent !is TraceEvent.Let) {
+                lastByVar[root] = TraceEvent.PathWrite("OUTPUT", root, listOf(root), null, value)
+            }
+            value
+        } finally {
+            if (capStack.isNotEmpty() && capStack.last() === frame) {
+                capStack.removeLast()
+            } else {
+                capStack.remove(frame)
+            }
+        }
     }
 
     fun requestedProvenanceKeys(): Set<String> = requestedExplains
@@ -571,8 +673,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
             addAll(flattenedCalc)
             depsCalcByVar[name]?.let { addAll(it) }
         }
-        val debugInputs = if (flattenedInputs.isNotEmpty()) flattenedInputs else baseInputs
-        val debugLines = renderLetDebug(exprByVar[name], debugInputs, letEvent.new)
+        val debugLines = renderLetDebug(exprByVar[name], baseInputs, flattenedInputs, letEvent.new)
         return listOf(
             ProvStep(
                 op = "LET",
@@ -583,6 +684,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                 new = letEvent.new,
                 calc = calc,
                 debug = debugLines,
+                sources = baseInputs,
             )
         )
     }
@@ -598,6 +700,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
             mapOf("kind" to c.kind, "name" to c.name, "args" to c.args, "value" to c.value)
         },
         "debug" to debug,
+        "sources" to sources.map { (n, v) -> mapOf("name" to n, "value" to v) },
     )
 
     private fun short(v: Any?): String = when (v) {
@@ -622,6 +725,12 @@ object Debug {
         val c = tracer as? CollectingTracer ?: return null
         c.noteExplainRequest(name)
         return c.explainProvenance(name)
+    }
+
+    fun <T> captureOutputField(name: Any, block: () -> T): T {
+        val c = tracer as? CollectingTracer ?: return block()
+        @Suppress("UNCHECKED_CAST")
+        return c.captureOutputField(name) { block() } as T
     }
 
     fun explainOutput(output: Any?): Map<String, Any?>? {

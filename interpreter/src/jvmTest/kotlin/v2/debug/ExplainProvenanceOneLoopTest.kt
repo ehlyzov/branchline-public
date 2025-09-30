@@ -5,6 +5,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ExplainProvenanceOneLoopTest {
@@ -74,6 +75,87 @@ class ExplainProvenanceOneLoopTest {
         )
         Debug.tracer = tracer
         return compileAndRun(body, row, extraFns = hostFns()) to tracer
+    }
+
+    @Test
+    fun `simple provenance`() {
+        val row = mapOf(
+            "order_id" to "A-1024",
+            "unit_price" to 35,
+            "quantity" to 3,
+            "discount" to 5
+        )
+        val program = """
+            LET unused = 5;
+            LET subtotal = row.unit_price * row.quantity;
+            LET discount = row.discount ?? 0;
+            LET result = subtotal - discount;
+            OUTPUT {
+                order_id: row.order_id,
+                result: result,
+                explain: EXPLAIN("result"),
+                explain_order: EXPLAIN("order_id")
+            }
+        """.trimIndent()
+
+        val (out, tracer) = runWithTracer(program, row)
+        @Suppress("UNCHECKED_CAST")
+        val obj = out as Map<String, Any?>
+        assertEquals(100, obj["result"])
+
+        @Suppress("UNCHECKED_CAST")
+        val explain = obj["explain"] as Map<String, Any?>
+        assertEquals("result", explain["var"])
+        @Suppress("UNCHECKED_CAST")
+        val steps = explain["steps"] as List<Map<String, Any?>>
+        assertTrue(steps.isNotEmpty(), "Expected provenance steps for result")
+        val firstStep = steps.first()
+        assertEquals("LET", firstStep["op"])
+        @Suppress("UNCHECKED_CAST")
+        val inputs = firstStep["inputs"] as List<Map<String, Any?>>
+        val names = inputs.map { it["name"] as String }
+        assertTrue(names.containsAll(listOf("row.unit_price", "row.quantity", "row.discount")))
+
+        val report = TraceReport.from(tracer, sample = 20, maxExplains = 8)
+        val human = report.explanations.joinToString("\n").also(::println)
+        assertTrue(human.contains("result"))
+        assertTrue(human.contains("order_id"))
+        Debug.tracer = null
+    }
+
+    @Test
+    fun `explainOutput aggregates provenance`() {
+        val row = mapOf(
+            "order_id" to "A-1024",
+            "unit_price" to 35,
+            "quantity" to 3,
+            "discount" to 5
+        )
+        val program = """
+            LET subtotal = row.unit_price * row.quantity;
+            LET discount = row.discount ?? 0;
+            LET result = subtotal - discount;
+
+            OUTPUT {
+                result: result,
+                explain: EXPLAIN("result")
+            }
+        """.trimIndent()
+
+        val (out, _) = runWithTracer(program, row)
+        @Suppress("UNCHECKED_CAST")
+        val obj = out as Map<String, Any?>
+        val explanations = Debug.explainOutput(obj)
+        assertNotNull(explanations)
+        val resultExplain = explanations!!["result"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val steps = resultExplain["steps"] as List<Map<String, Any?>>
+        assertTrue(steps.isNotEmpty(), "Expected result provenance from explainOutput")
+        val firstStep = steps.first()
+        @Suppress("UNCHECKED_CAST")
+        val inputNames = (firstStep["inputs"] as List<Map<String, Any?>>).map { it["name"] as String }
+        assertTrue(inputNames.containsAll(listOf("row.unit_price", "row.quantity", "row.discount")))
+        Debug.tracer = null
     }
 
     @Test

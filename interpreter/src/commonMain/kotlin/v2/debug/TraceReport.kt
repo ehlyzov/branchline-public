@@ -115,11 +115,34 @@ object TraceReport {
         // ---- NEW: human explanations from provenance ----
         val explainLines: List<String> = run {
             val preferred = t.requestedProvenanceKeys()
-            val keys = (if (preferred.isNotEmpty()) preferred else t.provenanceKeys()).take(maxExplains)
-            if (keys.isEmpty()) {
+            val seed = if (preferred.isNotEmpty()) preferred else t.provenanceKeys()
+            if (seed.isEmpty()) {
                 emptyList()
             } else {
-                keys.map { k -> t.humanize(k) }
+                val closure = LinkedHashSet<String>()
+                val queue = ArrayDeque<String>()
+                queue.addAll(seed)
+                while (queue.isNotEmpty()) {
+                    val name = queue.removeFirst()
+                    if (!closure.add(name)) continue
+                    val explanation = t.explainProvenance(name)
+                    if (explanation != null) {
+                        @Suppress("UNCHECKED_CAST")
+                        val steps = explanation["steps"] as? List<Map<String, Any?>> ?: emptyList()
+                        if (steps.isEmpty()) {
+                            val deps = t.directDependenciesOf(name)
+                            for (dep in deps) {
+                                if (dep !in closure && dep in t.provenanceKeys()) queue.addLast(dep)
+                            }
+                        } else {
+                            val deps = t.directDependenciesOf(name)
+                            for (dep in deps) {
+                                if (dep !in closure && dep in t.provenanceKeys()) queue.addLast(dep)
+                            }
+                        }
+                    }
+                }
+                closure.take(maxExplains).map { k -> t.humanize(k) }
             }
         }
 
