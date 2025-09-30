@@ -247,6 +247,10 @@ class VM(
             }
 
             pc++
+            if (pc >= bytecode.size() && callStack.isNotEmpty()) {
+                returnFromFunction(null)
+                continue
+            }
             if (targetCallDepth >= 0 && callStack.size <= targetCallDepth) {
                 break
             }
