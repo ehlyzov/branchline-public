@@ -37,6 +37,7 @@ import kotlin.js.JsExport
 @OptIn(ExperimentalJsExport::class)
 @JsExport
 object PlaygroundFacade {
+    private const val INPUT_VAR = "msg"
     private val prettyJson = Json { prettyPrint = true }
     private val compactJson = Json {}
 
@@ -66,8 +67,9 @@ object PlaygroundFacade {
         val priorTracer = Debug.tracer
         return try {
             Debug.tracer = tracer
-            val tokens = Lexer(program).lex()
-            val parsed = Parser(tokens, program).parse()
+            val effectiveProgram = wrapProgramIfNeeded(program)
+            val tokens = Lexer(effectiveProgram).lex()
+            val parsed = Parser(tokens, effectiveProgram).parse()
 
             val transforms = parsed.decls.filterIsInstance<TransformDecl>()
             val transform = transforms.find { it.name.equals("PLAYGROUND", ignoreCase = true) }
@@ -98,10 +100,11 @@ object PlaygroundFacade {
             val eval = makeEval(hostFns, funcs, registry, tracer)
             val exec = Exec(ir, eval, tracer)
 
-            val row = parseInput(inputJson)
+            val msg = parseInput(inputJson)
             val env = HashMap<String, Any?>().apply {
-                this["row"] = row
-                putAll(row)
+                this[INPUT_VAR] = msg
+                @Suppress("UNCHECKED_CAST")
+                if (msg is Map<*, *>) putAll(msg as Map<String, Any?>)
             }
             val result = exec.run(env, stringifyKeys = true)
             val jsonElement = toJsonElement(result)
@@ -155,6 +158,23 @@ object PlaygroundFacade {
         } finally {
             Debug.tracer = priorTracer
         }
+    }
+
+    private fun wrapProgramIfNeeded(body: String): String {
+        val hasTransformKeyword = Regex("\\bTRANSFORM\\b", RegexOption.IGNORE_CASE).containsMatchIn(body)
+        if (hasTransformKeyword) return body
+
+        val trimmed = body.trim().lines()
+        val indented = trimmed.joinToString("\n") { line ->
+            if (line.isBlank()) line else "    $line"
+        }
+        return """
+            SOURCE $INPUT_VAR;
+
+            TRANSFORM Playground { stream } {
+        $indented
+            }
+        """.trimIndent()
     }
 
     private fun parseInput(inputJson: String): Map<String, Any?> {

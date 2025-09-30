@@ -1,0 +1,39 @@
+{
+  "title": "Order shipment overview",
+  "description": "Peek into an order request and build an object focused on shipping operations.",
+  "program": [
+    "LET primaryItem = msg.items[0];",
+    "LET shippingLabel = msg.shipping.address.line1 + \", \" + msg.shipping.address.city;",
+    "",
+    "OUTPUT {",
+    "    order_id: msg.id,",
+    "    customer_email: msg.customer.email,",
+    "    rush_order: msg.shipping.priority == \"rush\",",
+    "    primary_sku: primaryItem.sku,",
+    "    shipping_label: shippingLabel",
+    "}"
+  ],
+  "input": {
+    "id": 50231,
+    "customer": {
+      "email": "lea@example.com"
+    },
+    "shipping": {
+      "priority": "rush",
+      "address": {
+        "line1": "500 Market Street",
+        "city": "San Francisco"
+      }
+    },
+    "items": [
+      {
+        "sku": "tee-olivine",
+        "quantity": 1
+      },
+      {
+        "sku": "hoodie-midnight",
+        "quantity": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "title": "Customer profile enrichment",
+  "description": "Combine basic customer attributes into a normalized profile with a fallback loyalty tier.",
+  "program": [
+    "LET fullName = msg.first_name + \" \" + msg.last_name;",
+    "LET loyaltyTier = msg.loyalty_tier ?? \"standard\";",
+    "",
+    "OUTPUT {",
+    "    id: msg.id,",
+    "    full_name: fullName,",
+    "    loyalty_tier: loyaltyTier,",
+    "    shipping_city: msg.address.city",
+    "}"
+  ],
+  "input": {
+    "id": 42,
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "loyalty_tier": null,
+    "address": {
+      "city": "London"
+    }
+  }
+}
