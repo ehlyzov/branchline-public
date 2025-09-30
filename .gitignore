@@ -1,0 +1,8 @@
+.DS_Store
+interpreter/build
+vm/build
+
+.gradle
+.idea
+.kotlin
+build

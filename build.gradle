@@ -1,0 +1,109 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.2.0' apply false
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.2.0' apply false
+    id 'io.gitlab.arturbosch.detekt' version '1.23.6' apply false
+    id 'me.champeau.jmh' version '0.7.3' apply false
+    id 'jacoco'
+}
+
+def npmCommand = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npm.cmd' : 'npm'
+def npxCommand = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npx.cmd' : 'npx'
+
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'org.jetbrains.kotlin.plugin.serialization'
+    apply plugin: 'io.gitlab.arturbosch.detekt'
+    apply plugin: 'jacoco'
+
+    group = 'io.github.ehlyzov.branchline-public'
+    version = '0.0.9-SNAPSHOT'
+
+    detekt {
+        config = files("$rootDir/detekt.yml")
+        buildUponDefaultConfig = true
+        ignoreFailures = true
+        autoCorrect = false
+    }
+
+    dependencies {
+        detektPlugins "io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6"
+    }
+
+    // Note: KMP modules have target-specific test tasks (e.g., jvmTest).
+    // This config applies only where the conventional 'test' task exists.
+    tasks.matching { it.name == 'test' }.configureEach { task ->
+        if (task instanceof Test) {
+            task.useJUnitPlatform {
+                excludeTags 'performance'
+            }
+        }
+    }
+
+    // Configure Kotlin toolchains/options depending on plugin used
+    plugins.withId('org.jetbrains.kotlin.jvm') {
+        kotlin {
+            jvmToolchain(21)
+            compilerOptions {
+                freeCompilerArgs.add("-Xnested-type-aliases")
+                freeCompilerArgs.add("-Xexpect-actual-classes")
+            }
+        }
+    }
+    plugins.withId('org.jetbrains.kotlin.multiplatform') {
+        kotlin {
+            jvmToolchain(21)
+        }
+    }
+
+    jacoco {
+        toolVersion = '0.8.11'
+    }
+
+    tasks.matching { it.name == 'jacocoTestReport' }.configureEach { report ->
+        // Depend on 'test' only when it exists (non-KMP modules)
+        if (tasks.findByName('test') != null) report.dependsOn 'test'
+        report.reports { r ->
+            r.xml.required.set(true)
+            r.html.required.set(true)
+        }
+    }
+}
+
+// Delegate run to the VM module's JVM runner
+tasks.register('run') {
+    group = 'application'
+    description = 'Runs v2.vm.VMLoopKt via :vm'
+    dependsOn(':vm:runVmLoop')
+}
+
+tasks.register('playgroundBuildAssets', Exec) {
+    group = 'documentation'
+    description = 'Builds the playground static bundle into docs/assets using npm'
+    dependsOn ':interpreter:jsBrowserProductionLibraryDistribution'
+    workingDir "$projectDir/playground"
+    commandLine npmCommand, 'run', 'build'
+    inputs.dir("$projectDir/playground/src")
+    outputs.dir("$projectDir/docs/assets")
+}
+
+tasks.register('docsGenerate', Exec) {
+    group = 'documentation'
+    description = 'Generates Diplodoc output into docs-compiled'
+    dependsOn 'playgroundBuildAssets'
+    workingDir projectDir
+    commandLine npxCommand, 'yfm', 'build', '-i', 'docs', '-o', 'docs-compiled'
+    inputs.dir("$projectDir/docs")
+    inputs.dir("$projectDir/docs/assets")
+    outputs.dir("$projectDir/docs-compiled")
+}
+
+tasks.register('docsBuild') {
+    group = 'documentation'
+    description = 'Builds playground assets and compiles the documentation site'
+    dependsOn 'docsGenerate'
+}
