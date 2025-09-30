@@ -21,6 +21,19 @@
    - Add `signature: TransformSignature?` to `TransformDecl`, storing resolved token spans for later error reporting.
    - Introduce contract model types (`TransformContract`, `SchemaRequirement`, `SchemaGuarantee`, `FieldConstraint`, `FieldShape`, `ValueShape`, etc.) in a shared module accessible to the semantic analyzer and runtime.
 
+## Proposed Contract Types
+
+| Type | Purpose | Key Fields | Notes |
+| --- | --- | --- | --- |
+| `TransformSignature` | Captures optional type annotations supplied in source code so the compiler can distinguish between explicit and inferred contracts. | `input: TypeRef?`, `output: TypeRef?`, `token: Token` | Lives on the AST; a `null` entry for either side means `AUTO` should be inferred. Token span powers precise diagnostics. |
+| `TransformContract` | Represents the final, resolved schema contract every compiled transform exposes, regardless of whether it came from inference or an explicit signature. | `input: SchemaRequirement`, `output: SchemaGuarantee`, `source: ContractSource` (`EXPLICIT` or `INFERRED`) | Stored alongside runtime artifacts so both tooling and execution paths share a consistent schema view. |
+| `SchemaRequirement` | Describes what the transform needs from its upstream input object/row. | `fields: LinkedHashMap<FieldName, FieldConstraint>`, `open: Boolean`, `dynamicAccess: List<DynamicAccess>` | `open` indicates whether additional, unspecified fields are tolerated. Dynamic access records computed keys for conservative downstream warnings. |
+| `SchemaGuarantee` | Details what structure the transform promises to emit downstream. | `fields: LinkedHashMap<FieldName, FieldShape>`, `mayEmitNull: Boolean`, `dynamicFields: List<DynamicField>` | Mirrors `SchemaRequirement` but differentiates between required and optional outputs; `mayEmitNull` flags branches that can return `null`. |
+| `FieldConstraint` | Tracks read-side expectations for a specific input field. | `required: Boolean`, `shape: ValueShape`, `sourceSpans: List<Token>` | `required` becomes `false` when accesses are guarded; source spans enable precise error messaging and tooling links. |
+| `FieldShape` | Expresses what a transform writes for a specific output field. | `required: Boolean`, `shape: ValueShape`, `origin: OriginKind` (`SET`, `MODIFY`, `APPEND`, etc.) | `origin` helps IDEs and analyzers explain how a field is produced (e.g., direct assignment vs accumulation). |
+| `DynamicAccess` / `DynamicField` | Represents computed keys or indices encountered during reads/writes. | `path: AccessPath`, `valueShape: ValueShape?`, `reason: DynamicReason` | Allows downstream tooling to understand partial coverage and highlight places where inference could not resolve concrete field names. |
+| `ValueShape` | Defines the lattice of possible runtime values flowing through fields. | Variants such as `Primitive(kind)`, `Array(element: ValueShape, aggregation: ArrayAggregation)`, `Object(schema: SchemaGuarantee, closed: Boolean)`, `Union(options: List<ValueShape>)`, `Unknown` | Serves both requirement and guarantee types, enabling merges across control flow and preserving extensibility for future literal types or refinements. |
+
 4. **Semantic Analysis Enhancements**
    - Resolve `TypeRef` identifiers in `TransformSignature`, producing typed schemas when available.
    - When signatures are explicit, validate that referenced schema types exist and align with the transform parameters.
