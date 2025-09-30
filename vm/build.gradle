@@ -1,0 +1,67 @@
+plugins {
+    id 'org.jetbrains.kotlin.multiplatform'
+}
+
+kotlin {
+    jvm {
+        compilations.all { comp ->
+            comp.kotlinOptions {
+                freeCompilerArgs += ["-Xnested-type-aliases", "-Xexpect-actual-classes"]
+            }
+        }
+        testRuns["test"].executionTask.configure {
+            useJUnitPlatform()
+        }
+    }
+    js(IR) {
+        nodejs()
+    }
+
+    sourceSets {
+        commonMain {
+            dependencies {
+                implementation project(':interpreter')
+                implementation 'org.jetbrains.kotlinx:kotlinx-serialization-core:1.9.0'
+                implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0'
+                implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2"
+                implementation 'net.codinux.log:klf:1.8.3'
+            }
+        }
+        commonTest {
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+            }
+        }
+        jvmTest {
+            dependencies {
+                implementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2"
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+                implementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
+                implementation 'net.jqwik:jqwik:1.8.5'
+                implementation project(':test-fixtures')
+            }
+        }
+        jsMain {
+            dependencies {
+                implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2"
+            }
+        }
+        jsTest {
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-test'
+            }
+        }
+    }
+}
+
+// JVM run task for VMLoop
+ tasks.register('runVmLoop', JavaExec) {
+    group = 'application'
+    description = 'Runs v2.vm.VMLoopKt on JVM target.'
+    mainClass = 'v2.vm.VMLoopKt'
+    classpath = files(
+        kotlin.targets.jvm.compilations.main.output.allOutputs,
+        configurations.jvmRuntimeClasspath
+    )
+    dependsOn kotlin.targets.jvm.compilations.main.compileTaskProvider
+}

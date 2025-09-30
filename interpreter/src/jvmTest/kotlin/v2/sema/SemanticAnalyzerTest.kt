@@ -1,0 +1,106 @@
+package v2.sema
+
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertDoesNotThrow
+import org.junit.jupiter.api.assertThrows
+import v2.Lexer
+import v2.Parser
+import v2.Program
+
+private fun compile(src: String): Program =
+    Parser(Lexer(src).lex()).parse()
+
+class SemanticAnalyzerTest {
+
+    @Test
+    fun `duplicate func throws`() {
+        val code = """
+            FUNC f() = 1;
+            FUNC f() = 2;
+        """
+        assertThrows<SemanticException> {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+    }
+
+    @Test
+    fun `undefined identifier in return`() {
+        val code = """
+            FUNC g() {
+                RETURN x + 1 ;
+            }
+        """
+        val ex = assertThrows<SemanticException> {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+        assertTrue(ex.message!!.contains("Undefined identifier 'x'"))
+    }
+
+    @Test
+    fun `shadow let allowed in inner block`() {
+        val code = """
+            FUNC f() {
+                LET a = 1;
+                IF true THEN {
+                    LET b = 2;
+                    RETURN b;
+                } ELSE {}
+            }
+        """
+        SemanticAnalyzer().analyze(compile(code)) // не бросает
+    }
+
+    @Test
+    fun `duplicate let in same scope throws`() {
+        val code = """
+            FUNC f() {
+                LET a = 1;
+                LET a = 2;
+            }
+        """
+        assertThrows<SemanticException> {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+    }
+
+    @Test
+    fun `global symbols unique`() {
+        val code = """
+            SHARED cache SINGLE;
+            TYPE cache = enum {A};
+        """
+        assertThrows<SemanticException> {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+    }
+
+    @Test
+    fun `for each var visible in body`() {
+        val code = """
+        TRANSFORM T { stream } {
+            FOR EACH r IN rows {
+                RETURN r.id ;
+            }
+        }
+        SOURCE rows;
+    """
+        assertDoesNotThrow {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+    }
+
+    @Test fun `shadow let throws`() {
+        val code = """
+        FUNC f() {
+            LET a = 1;
+            IF true THEN {
+                LET a = 2;
+            } ELSE {}
+        }
+    """
+        assertThrows<SemanticException> {
+            SemanticAnalyzer().analyze(compile(code))
+        }
+    }
+}

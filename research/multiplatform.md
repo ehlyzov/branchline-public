@@ -1,71 +1,22 @@
-# What will break (and how to fix)
+# Multiplatform Migration — Snapshot
 
-1. Big numbers
+## Module Layout
+- All core modules apply the Kotlin Multiplatform plugin. The interpreter and VM expose JVM + JS targets and reuse shared source sets, while the compiler module keeps stubs so existing callers continue to compile.【F:interpreter/build.gradle†L1-L47】【F:vm/build.gradle†L1-L52】【F:compiler/build.gradle†L1-L36】
+- The MPP modules are assembled together inside the main build; the remaining `platform` module is still JVM-only and currently just aggregates dependencies on the three language layers.【F:settings.gradle†L1-L7】【F:platform/build.gradle†L1-L7】
 
-* **Problem:** `java.math.BigInteger/BigDecimal` in `VM.kt` are JVM-only.
-* **Fix:** introduce a multiplatform big-num facade:
+## Shared Runtime Pieces
+- Big-number support is implemented as an `expect`/`actual` facade. Common code talks to `BLBigInt`/`BLBigDec`, JVM maps them to `java.math` types, and the JS actuals are lightweight `Long`/`Double` wrappers that let the code compile today.【F:interpreter/src/commonMain/kotlin/v2/runtime/bignum/BigNum.kt†L1-L36】【F:interpreter/src/jvmMain/kotlin/v2/runtime/bignum/BigNumJvm.kt†L1-L37】【F:interpreter/src/jsMain/kotlin/v2/runtime/bignum/BigNumJs.kt†L1-L44】
+- Cross-platform execution helpers (`TransformRegistry`, `runIR`, `buildRunnerFromIRMP`) already live in common source sets so JS tests can evaluate IR without the JVM parser or VM.【F:interpreter/src/jvmMain/kotlin/v2/ir/TransformRegistryJvm.kt†L7-L35】【F:interpreter/src/jsMain/kotlin/v2/ir/TransformRegistryJs.kt†L7-L27】【F:interpreter/src/commonMain/kotlin/v2/ir/RunnerMP.kt†L10-L39】
+- `compileStream` now resides in the VM module and exposes an `ExecutionEngine` parameter, allowing both interpreter and VM execution paths to share the same entrypoint on the JVM backend.【F:vm/src/commonMain/kotlin/v2/ir/StreamCompiler.kt†L31-L74】【F:interpreter/src/commonMain/kotlin/v2/ExecutionEngine.kt†L1-L7】
 
-    * `expect class BLBigInt` / `BLBigDec` with `actual` = `java.math` on JVM, and `kotlinx-bignum` (or similar) on JS/Native.
-    * Wrap arithmetic (`addNumbers`, `subtractNumbers`, …) to use this facade and fall back to `Long/Double` fast paths.
+## Gaps to Close
+- The VM module defines a JS target in Gradle but does not yet ship JS source sets, so bytecode execution remains JVM-only. Interpreter-based JS tests continue to pass, but VM parity on JS will require real `jsMain` actuals and possibly a stripped-down runtime.【F:vm/build.gradle†L1-L52】【d46dc5†L1-L2】
+- JS big numbers are lossy because they are backed by `Long`/`Double`; replacing them with `kotlinx-bignum` (or another arbitrary-precision library) is necessary before exposing Branchline semantics on JS to production users.【F:interpreter/src/jsMain/kotlin/v2/runtime/bignum/BigNumJs.kt†L3-L44】
+- The multiplatform runners still populate environments with the legacy `row` binding and clone the entire input map. Aligning them with the planned `in` default will avoid another round of breaking changes when the DSL surface is updated.【F:interpreter/src/commonMain/kotlin/v2/ir/RunnerMP.kt†L33-L38】【F:test-fixtures/src/jvmMain/kotlin/v2/testutils/Runners.kt†L35-L76】
+- VM compilation currently depends on interpreter classes (IR builders, semantic analysis). Decoupling the shared pieces into true common code and shrinking the remaining JVM-only bits in the `compiler` module will make it easier to publish JS/Native artifacts later. The compiler module already contains placeholders that point callers at the relocated implementations in `vm`/`interpreter`.【F:compiler/src/commonMain/kotlin/v2/ir/StreamCompiler.kt†L1-L3】【F:compiler/src/commonMain/kotlin/v2/ir/TransformRegistry.kt†L1-L3】【F:compiler/src/commonMain/kotlin/v2/vm/Compiler.kt†L1-L3】
 
-2. File I/O in the dumper
-
-* **Problem:** `BytecodeDumper.dumpToFile(..)` uses `java.nio.file.*`.
-* **Fix:** split I/O into a tiny platform layer:
-
-    * `expect fun writeText(path:String, text:String)` with `actual` per target (JVM NIO, JS `Blob`/download or `fs` in Node, Native `fopen`/`fprintf` or okio).
-    * Keep `format()` pure in common.
-
-3. Reflection in the hot loop / tracing
-
-* **Problem:** `instruction::class.simpleName` and enum lookup in the VM loop; Kotlin/JS has limited reflection and this costs even when tracing is off.
-* **Fix:** give every `Instruction` a numeric opcode id (or sealed-class `val id:Int`) known at compile time. Use that for counters/tracing. Make the string names only in debug builds.
-
-4. Host/platform types sprinkled in code
-
-* **Problem:** imports like `java.util.*` (some types are common, but guard usage), `ArrayDeque` is fine (stdlib), but prefer `kotlin.collections` versions.
-* **Fix:** audit imports; replace JVM-specific utilities with stdlib/common ones. Avoid `System.*` calls; use `TimeSource` or expect/actual if needed.
-
-5. Lambda execution model
-
-* **Current:** calling a lambda spins a nested VM (`lambdaVm.execute(...)`). It works on all targets, but it’s allocation-heavy and complicates snapshots.
-* **Upgrade (also helps KMP):** move lambdas into a **function table** with `CLOSURE`/`CALL_CLOSURE` so you reuse the same VM frame machinery across targets. This also avoids any reflection and keeps the core loop simple for JS/Native.
-
-6. JSON/Map implementations
-
-* **Good news:** `MutableMap<String, Any?>`, `ArrayList`, `ArrayDeque`, `LinkedHashMap` exist in common; but JS/Native performance characteristics differ.
-* **Tuning:** for hot OUTPUT/OBJECT paths, add a small-map implementation (open addressing up to N=8) in common code; keep insertion-order maps behind an interface if you rely on order.
-
-7. Exceptions & snapshots
-
-* All targets support exceptions, but stack traces and size differ. Keep snapshot format pure JSON/data and avoid serializing platform objects (you already do that). No changes needed, just avoid platform APIs.
-
-# Build layout (Gradle KMP)
-
-* Convert `language` to a **multiplatform module**:
-
-    * `commonMain` → VM, bytecode, compiler, IR, instruction set, tracing API, big-num facade.
-    * `jvmMain` → actuals for BigNum, file I/O, maybe faster maps.
-    * `jsMain` (IR or Wasm JS) → actuals for BigNum (kotlinx-bignum), file I/O stubs (download string, Node fs).
-    * `nativeMain` → actuals for BigNum, file I/O (okio or stdio).
-* Keep host-function integrations that call JVM libraries in a **separate JVM-only module** so JS/Native builds don’t see them.
-
-# Performance knobs that especially help JS/Native
-
-* **Inline caches / quickening** for `ACCESS_STATIC/SET_STATIC` → slot access. No platform APIs required; works everywhere and reduces polymorphic map lookups.
-* **Small object/array builders** (`MAKE_OBJECT_1/2/4`, `MAKE_ARRAY_0/1/2`) to cut allocations and dispatch.
-* **Const-prefix concat** ops (`CONCAT_C1`) to avoid generic string `+` on JS (which is slower).
-* **Locals-only by default** (mirror to env only when a binding escapes) to reduce map churn.
-
-# “Will we have problems?” — the punch list
-
-* ✅ After you:
-
-    1. replace BigInt/BigDec with an expect/actual facade,
-    2. remove `java.nio.file.*` from common,
-    3. remove reflection from the VM loop,
-    4. separate JVM-only host integrations,
-
-you can compile for **JS** and **Native**. The rest is performance tuning, not “it won’t compile”.
-
-If you want, I can sketch the `expect/actual` BigNum facade and the tiny changes in `VM.addNumbers`/`subtractNumbers` plus a KMP `build.gradle.kts` skeleton so you can flip on `js(IR)` and `native` targets today.
+## Next Steps
+1. Introduce real JS `jsMain` sources for the VM (even if interpreter-backed initially) so the build stops relying on empty source sets.
+2. Swap the JS big-number facade to a precise implementation and tighten numeric tests to run under both targets.
+3. Extract the minimal IR + evaluation surface that both VM and interpreter share into a neutral module, leaving the legacy compiler stubs behind as a thin compatibility layer.
+4. Update the shared runner helpers to expose the `in` binding and document the compatibility timeline for deprecating `row`.
