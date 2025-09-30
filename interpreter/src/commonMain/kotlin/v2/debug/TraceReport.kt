@@ -114,7 +114,8 @@ object TraceReport {
 
         // ---- NEW: human explanations from provenance ----
         val explainLines: List<String> = run {
-            val keys = t.provenanceKeys().take(maxExplains)
+            val preferred = t.requestedProvenanceKeys()
+            val keys = (if (preferred.isNotEmpty()) preferred else t.provenanceKeys()).take(maxExplains)
             if (keys.isEmpty()) {
                 emptyList()
             } else {

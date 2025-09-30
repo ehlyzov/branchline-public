@@ -1,6 +1,7 @@
 package v2.debug
 
 import kotlin.concurrent.Volatile
+import kotlin.collections.LinkedHashSet
 import v2.runtime.bignum.toPlainString
 import v2.Expr
 import v2.Token
@@ -96,10 +97,12 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
     val instructionCounts: MutableMap<String, Long> = mutableMapOf()
 
     private data class CaptureFrame(
-        val kind: String, // "SET" | "APPEND" | "MODIFY"
+        val kind: String, // "SET" | "APPEND" | "MODIFY" | "LET"
         val reads: MutableList<TraceEvent.Read> = mutableListOf(),
         val callStack: ArrayDeque<TraceEvent.Call> = ArrayDeque(), // стек для match Call/Return
-        val calc: MutableList<CalcStep> = mutableListOf() // завершённые HOST-вызовы
+        val calc: MutableList<CalcStep> = mutableListOf(), // завершённые HOST-вызовы
+        val letName: String? = null,
+        val expr: Expr? = null,
     )
 
     private val capStack = ArrayDeque<CaptureFrame>()
@@ -108,6 +111,8 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
     private val letCapStack = ArrayDeque<CaptureFrame>()
     private val depsByVar = mutableMapOf<String, List<Pair<String, Any?>>>()
     private val depsCalcByVar = mutableMapOf<String, List<CalcStep>>()
+    private val exprByVar = mutableMapOf<String, Expr>()
+    private val requestedExplains = LinkedHashSet<String>()
 
     data class ProvStep(
         val op: String,
@@ -116,7 +121,8 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
         val delta: Any?,
         val old: Any?,
         val new: Any?,
-        val calc: List<CalcStep> = emptyList()
+        val calc: List<CalcStep> = emptyList(),
+        val debug: List<String> = emptyList(),
     )
 
     // varName -> список шагов происхождения (в порядке появления)
@@ -132,6 +138,107 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
         capStack.addLast(CaptureFrame(kind))
     }
 
+    private fun renderLetDebug(
+        expr: Expr?,
+        inputs: List<Pair<String, Any?>>,
+        result: Any?
+    ): List<String> {
+        if (expr == null) return emptyList()
+        val valueLookup = LinkedHashMap<String, Any?>()
+        for ((k, v) in inputs) valueLookup[k] = v
+        val rendered = renderExprForDebug(expr, valueLookup)
+        if (rendered.isBlank()) return emptyList()
+        val rhs = formatDebugValue(result)
+        return listOf("$rendered -> $rhs")
+    }
+
+    private fun renderExprForDebug(expr: Expr, values: Map<String, Any?>): String = when (expr) {
+        is v2.NumberLiteral -> expr.token.lexeme
+        is v2.StringExpr -> formatDebugValue(expr.value)
+        is v2.BoolExpr -> expr.value.toString()
+        is v2.NullLiteral -> "null"
+        is v2.IdentifierExpr -> {
+            val value = lookupValueForDebug(expr.name, values)
+            value?.let { formatDebugValue(it) } ?: expr.name
+        }
+        is v2.AccessExpr -> {
+            val path = renderAccessPath(expr)
+            val value = path?.let { lookupValueForDebug(it, values) }
+            value?.let { formatDebugValue(it) } ?: path ?: "<access>"
+        }
+        is v2.BinaryExpr -> {
+            val op = expr.token.lexeme
+            val left = renderExprForDebug(expr.left, values)
+            val right = renderExprForDebug(expr.right, values)
+            "($left $op $right)"
+        }
+        is v2.UnaryExpr -> {
+            val op = expr.token.lexeme
+            val inner = renderExprForDebug(expr.expr, values)
+            "($op $inner)"
+        }
+        is v2.CallExpr -> {
+            val args = expr.args.joinToString(" ") { renderExprForDebug(it, values) }
+            "(${expr.callee.name}${if (args.isNotEmpty()) " $args" else ""})"
+        }
+        is v2.InvokeExpr -> {
+            val target = renderExprForDebug(expr.target, values)
+            val args = expr.args.joinToString(" ") { renderExprForDebug(it, values) }
+            "(invoke $target${if (args.isNotEmpty()) " $args" else ""})"
+        }
+        is v2.ArrayExpr -> expr.elements.joinToString(prefix = "[", postfix = "]") { renderExprForDebug(it, values) }
+        is v2.ObjectExpr -> "{…}"
+        is v2.ArrayCompExpr -> "[for ${expr.varName} in ${renderExprForDebug(expr.iterable, values)} …]"
+        is v2.IfElseExpr -> {
+            val cond = renderExprForDebug(expr.condition, values)
+            val thenBranch = renderExprForDebug(expr.thenBranch, values)
+            val elseBranch = renderExprForDebug(expr.elseBranch, values)
+            "(if $cond $thenBranch $elseBranch)"
+        }
+        is v2.LambdaExpr -> "<lambda>"
+        else -> expr::class.simpleName ?: "<expr>"
+    }
+
+    private fun renderAccessPath(expr: v2.AccessExpr): String? {
+        val base = when (val b = expr.base) {
+            is v2.IdentifierExpr -> b.name
+            is v2.AccessExpr -> renderAccessPath(b)
+            else -> renderExprForDebug(b, emptyMap())
+        } ?: return null
+        val sb = StringBuilder(base)
+        for (seg in expr.segs) {
+            when (seg) {
+                is v2.AccessSeg.Static -> when (val key = seg.key) {
+                    is v2.ObjKey.Name -> sb.append('.').append(key.v)
+                    is v2.I32 -> sb.append('[').append(key.v).append(']')
+                    is v2.I64 -> sb.append('[').append(key.v).append(']')
+                    is v2.IBig -> sb.append('[').append(key.v).append(']')
+                }
+                is v2.AccessSeg.Dynamic -> {
+                    val keyStr = renderExprForDebug(seg.keyExpr, emptyMap())
+                    val simple = keyStr.all { it.isLetterOrDigit() || it == '_' }
+                    if (simple) sb.append('.').append(keyStr) else sb.append('[').append(keyStr).append(']')
+                }
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun lookupValueForDebug(name: String, values: Map<String, Any?>): Any? {
+        values[name]?.let { return it }
+        val event = lastByVar[name]
+        return when (event) {
+            is TraceEvent.Let -> event.new
+            is TraceEvent.PathWrite -> event.new
+            else -> null
+        }
+    }
+
+    private fun formatDebugValue(value: Any?): String = when (value) {
+        is String -> "\"$value\""
+        else -> short(value)
+    }
+
     private fun popCaptureFor(node: IRNode) {
         when (node) {
             is IRSet, is IRAppendTo, is IRModify -> if (capStack.isNotEmpty()) capStack.removeLast()
@@ -140,6 +247,27 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
     }
 
     private fun currentCaptureOrNull(): CaptureFrame? = capStack.lastOrNull()
+
+    private fun flattenInputs(baseInputs: List<Pair<String, Any?>>): Pair<List<Pair<String, Any?>>, List<CalcStep>> {
+        if (baseInputs.isEmpty()) return emptyList<Pair<String, Any?>>() to emptyList()
+        val flattened = ArrayList<Pair<String, Any?>>()
+        val calc = ArrayList<CalcStep>()
+        val seen = LinkedHashSet<String>()
+        val queue = ArrayDeque<Pair<String, Any?>>()
+        baseInputs.forEach { queue.addLast(it) }
+        while (queue.isNotEmpty()) {
+            val (name, value) = queue.removeFirst()
+            if (!seen.add(name)) continue
+            val deps = depsByVar[name]
+            if (deps != null && deps.isNotEmpty()) {
+                queue.addAll(deps)
+                depsCalcByVar[name]?.let { calc.addAll(it) }
+            } else {
+                flattened += name to value
+            }
+        }
+        return flattened to calc
+    }
 
     private fun computeDelta(op: String, old: Any?, new: Any?): Any? {
         return when (op) {
@@ -229,7 +357,13 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                 pushCaptureFor(event.node)
                 // начать сбор зависимостей для LET
                 if (event.node is IRLet) {
-                    letCapStack.addLast(CaptureFrame("LET"))
+                    letCapStack.addLast(
+                        CaptureFrame(
+                            kind = "LET",
+                            letName = event.node.name,
+                            expr = event.node.expr
+                        )
+                    )
                 }
             }
 
@@ -254,23 +388,15 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                 // собрать шаг provenance, если есть активный кадр
                 val cap = currentCaptureOrNull()
                 val baseInputs = cap?.reads?.map { it.name to it.value } ?: emptyList()
-                val inputs = mutableListOf<Pair<String, Any?>>()
-                val calcForStep = mutableListOf<CalcStep>()
-                if (cap != null) calcForStep.addAll(cap.calc)
-                for ((n, v) in baseInputs) {
-                    val deps = depsByVar[n]
-                    val calc = depsCalcByVar[n]
-                    if (deps != null && deps.isNotEmpty()) {
-                        inputs.addAll(deps)
-                        if (calc != null && calc.isNotEmpty()) calcForStep.addAll(calc)
-                    } else {
-                        inputs.add(n to v)
-                    }
+                val (flattenedInputs, flattenedCalc) = flattenInputs(baseInputs)
+                val calcForStep = mutableListOf<CalcStep>().apply {
+                    if (cap != null) addAll(cap.calc)
+                    addAll(flattenedCalc)
                 }
                 val step = ProvStep(
                     op = event.op,
                     path = event.path,
-                    inputs = inputs,
+                    inputs = flattenedInputs,
                     delta = computeDelta(event.op, event.old, event.new),
                     old = event.old,
                     new = event.new,
@@ -282,10 +408,12 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
             is TraceEvent.Let -> {
                 lastByVar[event.name] = event
                 // зафиксировать зависимости и calc для переменной
-                val cap = letCapStack.lastOrNull()
-                val reads = cap?.reads ?: emptyList()
+                val frame = letCapStack.toList().asReversed().firstOrNull { it.letName == event.name }
+                    ?: letCapStack.lastOrNull()
+                val reads = frame?.reads ?: emptyList()
                 depsByVar[event.name] = reads.map { it.name to it.value }
-                depsCalcByVar[event.name] = cap?.calc?.toList() ?: emptyList()
+                depsCalcByVar[event.name] = frame?.calc?.toList() ?: emptyList()
+                frame?.expr?.let { exprByVar[event.name] = it }
             }
 
             is TraceEvent.Return -> {
@@ -329,7 +457,8 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
      * "steps": [ { op, path, inputs, delta, old, new }, ... ] }
      */
     fun explainProvenance(name: String): Map<String, Any?>? {
-        val steps = provByRoot[name] ?: emptyList()
+        val rawSteps = provByRoot[name] ?: emptyList()
+        val steps = if (rawSteps.isNotEmpty()) rawSteps else buildLetProvenance(name)
         if (steps.isEmpty() && name !in lastByVar) return null
         val finalValue = when (val ev = lastByVar[name]) {
             is TraceEvent.Let -> ev.new
@@ -337,24 +466,29 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
             is TraceEvent.PathWrite -> ev.new
             else -> null
         }
-        val stepsOut = steps.map { s ->
-            mapOf(
-                "op" to s.op,
-                "path" to s.path,
-                "inputs" to s.inputs.map { (n, v) -> mapOf("name" to n, "value" to v) },
-                "delta" to s.delta,
-                "old" to s.old,
-                "new" to s.new,
-                "calc" to s.calc.map { c ->
-                    mapOf("kind" to c.kind, "name" to c.name, "args" to c.args, "value" to c.value)
-                },
-            )
-        }
+        val stepsOut = steps.map { it.toMap() }
         return mapOf("var" to name, "final" to finalValue, "steps" to stepsOut)
     }
 
     /** Ключи, по которым есть шаги provenance. */
-    fun provenanceKeys(): Set<String> = provByRoot.keys
+    fun provenanceKeys(): Set<String> {
+        val keys = LinkedHashSet<String>()
+        keys.addAll(provByRoot.keys)
+        for ((name, event) in lastByVar) {
+            when (event) {
+                is TraceEvent.Let,
+                is TraceEvent.PathWrite -> keys.add(name)
+                else -> Unit
+            }
+        }
+        return keys
+    }
+
+    fun requestedProvenanceKeys(): Set<String> = requestedExplains
+
+    fun noteExplainRequest(name: String) {
+        requestedExplains.add(name)
+    }
 
     /** Короткая «человеческая» версия. */
     fun humanize(name: String): String {
@@ -375,7 +509,9 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
         val sb = StringBuilder()
         for ((top, lst) in byTop) {
             if (sb.isNotEmpty()) sb.append('\n')
-            sb.append("• ").append(name).append('.').append(top.toString()).append('\n')
+            val topLabel = top.toString()
+            val header = if (topLabel == name) name else "$name.$topLabel"
+            sb.append("• ").append(header).append('\n')
             for (s in lst) {
                 val op = s["op"] as String
                 sb.append("  → ").append(op)
@@ -391,8 +527,9 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
                     "MODIFY" -> sb.append('\n')
                     else -> sb.append('\n')
                 }
+                val debugLines = (s["debug"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                 val inputPairs = canonicalizeInputPairs(s["inputs"] as List<Map<String, Any?>>)
-                if (inputPairs.isNotEmpty()) {
+                if (inputPairs.isNotEmpty() && debugLines.isEmpty()) {
                     sb.append("    inputs: ")
                         .append(inputPairs.joinToString(", ") { (n, v) -> "$n=${short(v)}" })
                         .append('\n')
@@ -400,17 +537,25 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
 
                 @Suppress("UNCHECKED_CAST")
                 val calc = s["calc"] as? List<Map<String, Any?>> ?: emptyList()
-                if (calc.isNotEmpty()) {
+                if (debugLines.isNotEmpty() || calc.isNotEmpty()) {
                     sb.append("    calc:\n")
+                    for (line in debugLines) {
+                        sb.append("      ").append(line).append('\n')
+                    }
                     for (c in calc) {
+                        val kind = c["kind"] as? String
                         val name = c["name"] as String?
 
                         @Suppress("UNCHECKED_CAST")
                         val args = (c["args"] as List<Any?>).joinToString(", ") { short(it) }
                         val value = short(c["value"])
-                        sb.append(
-                            "      "
-                        ).append(name ?: "<host>").append('(').append(args).append(") = ").append(value).append('\n')
+                        sb.append("      ")
+                            .append(name ?: kind ?: "<calc>")
+                            .append('(')
+                            .append(args)
+                            .append(") = ")
+                            .append(value)
+                            .append('\n')
                     }
                 }
             }
@@ -418,10 +563,51 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
         return sb.toString().trimEnd()
     }
 
+    private fun buildLetProvenance(name: String): List<ProvStep> {
+        val letEvent = lastByVar[name] as? TraceEvent.Let ?: return emptyList()
+        val baseInputs = depsByVar[name] ?: emptyList()
+        val (flattenedInputs, flattenedCalc) = flattenInputs(baseInputs)
+        val calc = mutableListOf<CalcStep>().apply {
+            addAll(flattenedCalc)
+            depsCalcByVar[name]?.let { addAll(it) }
+        }
+        val debugInputs = if (flattenedInputs.isNotEmpty()) flattenedInputs else baseInputs
+        val debugLines = renderLetDebug(exprByVar[name], debugInputs, letEvent.new)
+        return listOf(
+            ProvStep(
+                op = "LET",
+                path = listOf(name),
+                inputs = flattenedInputs,
+                delta = letEvent.new,
+                old = letEvent.old,
+                new = letEvent.new,
+                calc = calc,
+                debug = debugLines,
+            )
+        )
+    }
+
+    private fun ProvStep.toMap(): Map<String, Any?> = mapOf(
+        "op" to op,
+        "path" to path,
+        "inputs" to inputs.map { (n, v) -> mapOf("name" to n, "value" to v) },
+        "delta" to delta,
+        "old" to old,
+        "new" to new,
+        "calc" to calc.map { c ->
+            mapOf("kind" to c.kind, "name" to c.name, "args" to c.args, "value" to c.value)
+        },
+        "debug" to debug,
+    )
+
     private fun short(v: Any?): String = when (v) {
         null -> "null"
         is v2.runtime.bignum.BLBigDec -> v.toPlainString()
         is Number -> v.toString()
+        is Pair<*, *> -> {
+            val second = short(v.second)
+            "${v.first}=$second"
+        }
         is Map<*, *> -> (v["id"] ?: v["name"] ?: "object").toString()
         is List<*> -> "list(${v.size})"
         else -> v.toString()
@@ -434,7 +620,26 @@ object Debug {
 
     fun explain(name: String): Any? {
         val c = tracer as? CollectingTracer ?: return null
+        c.noteExplainRequest(name)
         return c.explainProvenance(name)
+    }
+
+    fun explainOutput(output: Any?): Map<String, Any?>? {
+        val c = tracer as? CollectingTracer ?: return null
+        val keys = when (output) {
+            is Map<*, *> -> output.keys.mapNotNull { it?.toString() }
+            is List<*> -> output.indices.map { it.toString() }
+            else -> c.provenanceKeys().toList()
+        }
+        val results = LinkedHashMap<String, Any?>()
+        for (key in keys) {
+            c.noteExplainRequest(key)
+            val explanation = c.explainProvenance(key)
+            if (explanation != null) {
+                results[key] = explanation
+            }
+        }
+        return if (results.isEmpty()) null else results
     }
 }
 

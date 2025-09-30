@@ -10,6 +10,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+import v2.debug.Debug
+import v2.debug.CollectingTracer
+import v2.debug.TraceOptions
+import v2.debug.TraceReport
 import v2.Dec
 import v2.FuncDecl
 import v2.IBig
@@ -36,8 +40,32 @@ object PlaygroundFacade {
     private val prettyJson = Json { prettyPrint = true }
     private val compactJson = Json {}
 
-    fun run(program: String, inputJson: String): PlaygroundResult {
+    private val debugHostFns: Map<String, (List<Any?>) -> Any?> = mapOf(
+        "EXPLAIN" to { args ->
+            require(args.size == 1 && args[0] is String) { "EXPLAIN(varName)" }
+            val name = args[0] as String
+            Debug.explain(name) ?: mapOf(
+                "variable" to name,
+                "info" to "Tracing disabled or no provenance recorded"
+            )
+        }
+    )
+
+    fun run(program: String, inputJson: String, enableTracing: Boolean = false): PlaygroundResult {
+        val tracer = if (enableTracing) {
+            CollectingTracer(
+                TraceOptions(
+                    step = true,
+                    includeEval = false,
+                    includeCalls = true
+                )
+            )
+        } else {
+            null
+        }
+        val priorTracer = Debug.tracer
         return try {
+            Debug.tracer = tracer
             val tokens = Lexer(program).lex()
             val parsed = Parser(tokens, program).parse()
 
@@ -49,10 +77,12 @@ object PlaygroundFacade {
                     outputJson = null,
                     errorMessage = "Program must declare at least one TRANSFORM block.",
                     line = null,
-                    column = null
+                    column = null,
+                    explainJson = null,
+                    explainHuman = null
                 )
 
-            val hostFns = emptyMap<String, (List<Any?>) -> Any?>()
+            val hostFns = debugHostFns
             val funcs: Map<String, FuncDecl> = parsed.decls
                 .filterIsInstance<FuncDecl>()
                 .associateBy { it.name }
@@ -65,8 +95,8 @@ object PlaygroundFacade {
                 hostFns,
                 transforms.mapNotNull { decl -> decl.name?.let { it to decl } }.toMap()
             )
-            val eval = makeEval(hostFns, funcs, registry)
-            val exec = Exec(ir, eval)
+            val eval = makeEval(hostFns, funcs, registry, tracer)
+            val exec = Exec(ir, eval, tracer)
 
             val row = parseInput(inputJson)
             val env = HashMap<String, Any?>().apply {
@@ -76,13 +106,21 @@ object PlaygroundFacade {
             val result = exec.run(env, stringifyKeys = true)
             val jsonElement = toJsonElement(result)
             val output = prettyJson.encodeToString(jsonElement)
+            val explanationMap = tracer?.let { Debug.explainOutput(result) }
+            val explainJson = explanationMap?.let { prettyJson.encodeToString(toJsonElement(it)) }
+            val explainHuman = tracer?.let {
+                val lines = TraceReport.from(it).explanations
+                lines.joinToString("\n\n").ifBlank { null }
+            }
 
             PlaygroundResult(
                 success = true,
                 outputJson = output,
                 errorMessage = null,
                 line = null,
-                column = null
+                column = null,
+                explainJson = explainJson,
+                explainHuman = explainHuman
             )
         } catch (ex: ParseException) {
             PlaygroundResult(
@@ -90,7 +128,9 @@ object PlaygroundFacade {
                 outputJson = null,
                 errorMessage = ex.message ?: "Parser error",
                 line = ex.token.line,
-                column = ex.token.column
+                column = ex.token.column,
+                explainJson = null,
+                explainHuman = null
             )
         } catch (ex: v2.sema.SemanticException) {
             PlaygroundResult(
@@ -98,7 +138,9 @@ object PlaygroundFacade {
                 outputJson = null,
                 errorMessage = ex.message ?: "Semantic error",
                 line = ex.token.line,
-                column = ex.token.column
+                column = ex.token.column,
+                explainJson = null,
+                explainHuman = null
             )
         } catch (ex: Throwable) {
             PlaygroundResult(
@@ -106,8 +148,12 @@ object PlaygroundFacade {
                 outputJson = null,
                 errorMessage = ex.message ?: ex.toString(),
                 line = null,
-                column = null
+                column = null,
+                explainJson = null,
+                explainHuman = null
             )
+        } finally {
+            Debug.tracer = priorTracer
         }
     }
 
@@ -176,5 +222,7 @@ data class PlaygroundResult(
     val outputJson: String?,
     val errorMessage: String?,
     val line: Int?,
-    val column: Int?
+    val column: Int?,
+    val explainJson: String?,
+    val explainHuman: String?
 )
