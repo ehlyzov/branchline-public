@@ -6,3 +6,6 @@ vm/build
 .idea
 .kotlin
 build
+.jqwik-database*
+/kotlin-js-store/
+/playground/node_modules/
