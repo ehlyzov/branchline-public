@@ -1,37 +1,101 @@
 SOURCE row;
 
-TRANSFORM FileSummary { stream } {
-    LET suites = [];
+FUNC toNumber(value) {
+    LET parsed = NUMBER(value ?? 0);
+    IF parsed == NULL THEN { RETURN 0; }
+    RETURN parsed;
+}
 
-    LET direct = row.testsuite;
-    IF direct != NULL THEN {
-        LET normalized = IF IS_OBJECT(direct) THEN [direct] ELSE direct;
-        FOR suite IN normalized {
-            SET suites = APPEND(suites, suite);
-        }
+FUNC toList(candidate) {
+    IF candidate == NULL THEN { RETURN []; }
+    IF IS_OBJECT(candidate) THEN { RETURN [candidate]; }
+    RETURN candidate;
+}
+
+FUNC appendSuites(acc, branch) {
+    LET result = acc;
+    FOR suite IN toList(branch) {
+        SET result = APPEND(result, suite);
     }
+    RETURN result;
+}
 
-    LET container = row.testsuites;
+FUNC collectSuites(root) {
+    LET suites = [];
+    SET suites = appendSuites(suites, root.testsuite);
+
+    LET container = root.testsuites;
     IF container != NULL THEN {
         LET branch = container.testsuite ?? container;
-        LET normalizedContainer = IF IS_OBJECT(branch) THEN [branch] ELSE branch;
-        FOR suite IN normalizedContainer {
-            SET suites = APPEND(suites, suite);
-        }
+        SET suites = appendSuites(suites, branch);
     }
 
+    RETURN suites;
+}
+
+FUNC suiteMetrics(suite) {
+    RETURN {
+        tests: toNumber(suite["@tests"]),
+        failures: toNumber(suite["@failures"]),
+        errors: toNumber(suite["@errors"]),
+        skipped: toNumber(suite["@skipped"])
+    };
+}
+
+FUNC summariseSuites(suites) {
+    LET totals = { tests: 0, failures: 0, errors: 0, skipped: 0 };
+    FOR suite IN suites {
+        SET totals.tests = totals.tests + suite.tests;
+        SET totals.failures = totals.failures + suite.failures;
+        SET totals.errors = totals.errors + suite.errors;
+        SET totals.skipped = totals.skipped + suite.skipped;
+    }
+    RETURN totals;
+}
+
+FUNC statusFor(tests, failed) {
+    IF tests == 0 THEN { RETURN "error"; }
+    IF failed == 0 THEN { RETURN "passing"; }
+    RETURN "failing";
+}
+
+FUNC colorFor(status) {
+    IF status == "passing" THEN { RETURN "44cc11"; }
+    IF status == "failing" THEN { RETURN "e05d44"; }
+    IF status == "error" THEN { RETURN "f39c12"; }
+    RETURN "9f9f9f";
+}
+
+FUNC formatSummary(tests, failed, skipped) {
+    LET summary = STRING(tests) + " tests";
+    IF failed > 0 THEN {
+        SET summary = summary + ", " + STRING(failed) + " failed";
+    }
+    IF skipped > 0 THEN {
+        SET summary = summary + ", " + STRING(skipped) + " skipped";
+    }
+    RETURN summary;
+}
+
+TRANSFORM FileSummary { stream } {
+    LET suites = collectSuites(row);
     LET metrics = [];
     FOR suite IN suites {
-        LET item = {
-            tests: suite["@tests"],
-            failures: suite["@failures"],
-            errors: suite["@errors"],
-            skipped: suite["@skipped"]
-        };
-        SET metrics = APPEND(metrics, item);
+        SET metrics = APPEND(metrics, suiteMetrics(suite));
     }
 
+    LET totals = summariseSuites(metrics);
+    LET failed = totals.failures + totals.errors;
+    LET status = statusFor(totals.tests, failed);
+    LET summary = formatSummary(totals.tests, failed, totals.skipped);
+    LET color = colorFor(status);
+
     OUTPUT {
-        suites: metrics
+        suites: metrics,
+        totals: totals,
+        failed: failed,
+        status: status,
+        summary: summary,
+        color: color
     };
 }
