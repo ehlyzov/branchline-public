@@ -2,6 +2,11 @@ package v2
 
 sealed interface Ast
 
+data class TokenSpan(
+    val start: Token,
+    val end: Token,
+)
+
 sealed interface TransformBody : Ast {
     val statements: List<Stmt>
 }
@@ -75,6 +80,7 @@ data class OutputDecl(val adapter: AdapterSpec?, val template: Expr, val token: 
 data class TransformDecl(
     val name: String?,
     val params: List<String>,
+    val signature: TransformSignature?,
     val mode: Mode,
     val body: TransformBody,
     val token: Token,
@@ -82,7 +88,63 @@ data class TransformDecl(
 
 enum class Mode { STREAM, BUFFER }
 
+data class TransformSignature(
+    val input: TypeRef?,
+    val output: TypeRef?,
+    val tokenSpan: TokenSpan,
+) : Ast
+
 data class AdapterSpec(val name: String, val args: List<Expr>, val token: Token) : Ast
+
+sealed interface TypeRef : Ast {
+    val token: Token
+}
+
+enum class PrimitiveType {
+    TEXT,
+    NUMBER,
+    BOOLEAN,
+    NULL,
+    ANY,
+    ANY_NULLABLE,
+}
+
+data class PrimitiveTypeRef(
+    val kind: PrimitiveType,
+    override val token: Token,
+) : TypeRef
+
+data class ArrayTypeRef(
+    val element: TypeRef,
+    override val token: Token,
+) : TypeRef
+
+data class RecordFieldTypeRef(
+    val name: String,
+    val type: TypeRef,
+    val isOptional: Boolean,
+    val token: Token,
+) : Ast
+
+data class RecordTypeRef(
+    val fields: List<RecordFieldTypeRef>,
+    override val token: Token,
+) : TypeRef
+
+data class UnionTypeRef(
+    val options: List<TypeRef>,
+    override val token: Token,
+) : TypeRef
+
+data class EnumTypeRef(
+    val values: List<String>,
+    override val token: Token,
+) : TypeRef
+
+data class NamedTypeRef(
+    val name: String,
+    override val token: Token,
+) : TypeRef
 
 sealed class Property
 

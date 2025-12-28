@@ -138,6 +138,24 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
             consume(TokenType.RIGHT_PAREN, "Expect ')' after transform parameters")
         }
 
+        var signature: TransformSignature? = null
+        if (match(TokenType.COLON)) {
+            val signatureStart = previous()
+            val inputType = when {
+                check(TokenType.ARROW) -> null
+                isTypeRefStart(peek().type) -> parseTypeRef()
+                else -> error(peek(), "Expect type or '->' after ':' in transform signature")
+            }
+            consume(TokenType.ARROW, "Expect '->' in transform signature")
+            val outputType = if (isTypeRefStart(peek().type)) parseTypeRef() else null
+            val signatureEnd = previous()
+            signature = TransformSignature(
+                input = inputType,
+                output = outputType,
+                tokenSpan = TokenSpan(signatureStart, signatureEnd),
+            )
+        }
+
         // Optional mode block; only BUFFER supported. STREAM not supported yet.
         var mode: Mode = Mode.BUFFER
         if (check(TokenType.LEFT_BRACE) && (checkNext(TokenType.STREAM) || checkNext(TokenType.BUFFER))) {
@@ -153,7 +171,7 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
 
         val body: TransformBody = parseBlock()
 
-        return TransformDecl(nameTok?.lexeme, params, mode, body, start)
+        return TransformDecl(nameTok?.lexeme, params, signature, mode, body, start)
     }
 
     private fun parseAdapter(): AdapterSpec {
@@ -245,6 +263,102 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
 
         optionalSemicolon()
         return TypeDecl(nameTok.lexeme, kind, defs, typeTok)
+    }
+
+    private fun parseTypeRef(): TypeRef = parseUnionTypeRef()
+
+    private fun isTypeRefStart(type: TokenType): Boolean {
+        return when (type) {
+            TokenType.LEFT_BRACE,
+            TokenType.LEFT_BRACKET,
+            TokenType.ENUM,
+            TokenType.IDENTIFIER -> true
+            else -> false
+        }
+    }
+
+    private fun parseUnionTypeRef(): TypeRef {
+        var type = parsePrimaryTypeRef()
+        if (match(TokenType.PIPE)) {
+            val options = mutableListOf(type)
+            do {
+                options += parsePrimaryTypeRef()
+            } while (match(TokenType.PIPE))
+            type = UnionTypeRef(options, options.first().token)
+        }
+        return type
+    }
+
+    private fun parsePrimaryTypeRef(): TypeRef {
+        return when {
+            match(TokenType.LEFT_BRACE) -> parseRecordType(previous())
+            match(TokenType.LEFT_BRACKET) -> parseArrayType(previous())
+            match(TokenType.ENUM) -> parseEnumType(previous())
+            match(TokenType.IDENTIFIER) -> parseNamedType(previous())
+            else -> error(peek(), "Expect type expression")
+        }
+    }
+
+    private fun parseRecordType(start: Token): TypeRef {
+        val fields = mutableListOf<RecordFieldTypeRef>()
+        if (!check(TokenType.RIGHT_BRACE)) {
+            while (true) {
+                val nameTok = consume(TokenType.IDENTIFIER, "Expect record field name")
+                val isOptional = match(TokenType.QUESTION)
+                consume(TokenType.COLON, "Expect ':' after record field name")
+                val fieldType = parseTypeRef()
+                fields += RecordFieldTypeRef(nameTok.lexeme, fieldType, isOptional, nameTok)
+                if (!match(TokenType.COMMA)) break
+                if (check(TokenType.RIGHT_BRACE)) break
+            }
+        }
+        consume(TokenType.RIGHT_BRACE, "Expect '}' after record type")
+        return RecordTypeRef(fields, start)
+    }
+
+    private fun parseArrayType(start: Token): TypeRef {
+        val elementType = parseTypeRef()
+        consume(TokenType.RIGHT_BRACKET, "Expect ']' after array type")
+        return ArrayTypeRef(elementType, start)
+    }
+
+    private fun parseEnumType(start: Token): TypeRef {
+        consume(TokenType.LEFT_BRACE, "Expect '{' after enum")
+        val values = mutableListOf<String>()
+        if (check(TokenType.RIGHT_BRACE)) {
+            error(peek(), "Expect enum value")
+        }
+        while (true) {
+            values += consume(TokenType.IDENTIFIER, "Expect enum value").lexeme
+            if (!match(TokenType.COMMA)) break
+            if (check(TokenType.RIGHT_BRACE)) break
+        }
+        consume(TokenType.RIGHT_BRACE, "Expect '}' after enum type")
+        return EnumTypeRef(values, start)
+    }
+
+    private fun parseNamedType(tok: Token): TypeRef {
+        return when (tok.lexeme) {
+            "_" -> {
+                val isNullable = match(TokenType.QUESTION)
+                PrimitiveTypeRef(
+                    if (isNullable) PrimitiveType.ANY_NULLABLE else PrimitiveType.ANY,
+                    tok
+                )
+            }
+            "Text" -> PrimitiveTypeRef(PrimitiveType.TEXT, tok)
+            "Number" -> PrimitiveTypeRef(PrimitiveType.NUMBER, tok)
+            "Boolean" -> PrimitiveTypeRef(PrimitiveType.BOOLEAN, tok)
+            "Null" -> PrimitiveTypeRef(PrimitiveType.NULL, tok)
+            "Any" -> {
+                val isNullable = match(TokenType.QUESTION)
+                PrimitiveTypeRef(
+                    if (isNullable) PrimitiveType.ANY_NULLABLE else PrimitiveType.ANY,
+                    tok
+                )
+            }
+            else -> NamedTypeRef(tok.lexeme, tok)
+        }
     }
 
     // ------------------- statements & block -------------------------

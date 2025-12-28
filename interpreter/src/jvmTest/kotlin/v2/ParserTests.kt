@@ -166,6 +166,35 @@ class ParserTest {
     }
 
     @Test
+    fun `transform signature parses with underscore types`() {
+        val program = parse("""
+            TRANSFORM Signed: _ -> _? { }
+        """.trimIndent())
+        val transform = program.decls.first() as TransformDecl
+        val signature = transform.signature ?: error("Expected signature")
+        val input = signature.input as PrimitiveTypeRef
+        val output = signature.output as PrimitiveTypeRef
+        assertEquals(PrimitiveType.ANY, input.kind)
+        assertEquals(PrimitiveType.ANY_NULLABLE, output.kind)
+    }
+
+    @Test
+    fun `transform signature parses record list union and enum types`() {
+        val program = parse("""
+            TRANSFORM Typed: {name: Text, tags?: [Text]} -> [Number | enum { LOW, HIGH }] { }
+        """.trimIndent())
+        val transform = program.decls.first() as TransformDecl
+        val signature = transform.signature ?: error("Expected signature")
+        assertTrue(signature.input is RecordTypeRef)
+        val record = signature.input as RecordTypeRef
+        assertEquals(2, record.fields.size)
+        assertTrue(record.fields[1].isOptional)
+        assertTrue(signature.output is ArrayTypeRef)
+        val output = signature.output as ArrayTypeRef
+        assertTrue(output.element is UnionTypeRef)
+    }
+
+    @Test
     fun `unclosed transform block throws`() {
         assertThrows<ParseException> {
             parse("""
@@ -184,6 +213,24 @@ class ParserTest {
                 }
                 """.trimIndent()
             )
+        }
+    }
+
+    @Test
+    fun `transform signature missing arrow throws`() {
+        assertThrows<ParseException> {
+            parse("""
+                TRANSFORM Bad: Text { }
+            """.trimIndent())
+        }
+    }
+
+    @Test
+    fun `transform signature invalid record field throws`() {
+        assertThrows<ParseException> {
+            parse("""
+                TRANSFORM Bad: {name Text} -> { } { }
+            """.trimIndent())
         }
     }
 

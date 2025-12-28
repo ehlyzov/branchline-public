@@ -42,11 +42,12 @@ adapterCall ::= IDENTIFIER "(" argList? ")"                    ;
 # Transforms
 #---------------------------------------------------------------------------
 
-transformDecl    ::= annotation* **TRANSFORM** IDENTIFIER? transformMode?
-                     block                                                   ;
+transformDecl    ::= annotation* **TRANSFORM** IDENTIFIER? paramList?
+                     transformSignature? transformMode? block                ;
 
 annotation       ::= **@** IDENTIFIER                                        ;
 transformMode    ::= "{" ( **stream** | **buffer** ) "}"                    ;
+transformSignature ::= ":" typeRef? "->" typeRef?                            ;
 
 #---------------------------------------------------------------------------
 # Shared memory
@@ -68,6 +69,15 @@ typeExpr         ::= **enum** "{" enumVal ("," enumVal)* "}"                 |
 enumVal          ::= IDENTIFIER                                              ;
 simpleType       ::= **string** | **number** | **boolean** | **null**
                    | **array** "<" simpleType ">" | IDENTIFIER               ;
+typeRef          ::= typeUnion                                               ;
+typeUnion        ::= typePrimary ( "|" typePrimary )*                        ;
+typePrimary      ::= typePrimitive | typeRecord | typeArray | typeEnum | IDENTIFIER ;
+typePrimitive    ::= "Text" | "Number" | "Boolean" | "Null" | "Any" | "Any?"
+                   | "_" | "_?"                                              ;
+typeRecord       ::= "{" typeField ("," typeField)* "}"                      ;
+typeField        ::= IDENTIFIER ["?"] ":" typeRef                            ;
+typeArray        ::= "[" typeRef "]"                                         ;
+typeEnum         ::= **enum** "{" IDENTIFIER ("," IDENTIFIER)* "}"           ;
 
 #---------------------------------------------------------------------------
 # Blocks  (braces **or** off-side  INDENT / DEDENT tokens)
