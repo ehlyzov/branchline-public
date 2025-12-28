@@ -141,13 +141,15 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
         var signature: TransformSignature? = null
         if (match(TokenType.COLON)) {
             val signatureStart = previous()
-            val inputType = when {
-                check(TokenType.ARROW) -> null
-                isTypeRefStart(peek().type) -> parseTypeRef()
-                else -> error(peek(), "Expect type or '->' after ':' in transform signature")
+            if (!isTypeRefStart(peek().type)) {
+                error(peek(), "Expect type after ':' in transform signature")
             }
+            val inputType = parseTypeRef()
             consume(TokenType.ARROW, "Expect '->' in transform signature")
-            val outputType = if (isTypeRefStart(peek().type)) parseTypeRef() else null
+            if (!isTypeRefStart(peek().type)) {
+                error(peek(), "Expect output type after '->' in transform signature")
+            }
+            val outputType = parseTypeRef()
             val signatureEnd = previous()
             signature = TransformSignature(
                 input = inputType,

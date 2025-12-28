@@ -234,6 +234,15 @@ class ParserTest {
         }
     }
 
+    @Test
+    fun `transform signature missing output type throws`() {
+        assertThrows<ParseException> {
+            parse("""
+                TRANSFORM Bad: Text -> { LET x = 1 }
+            """.trimIndent())
+        }
+    }
+
     // ------------------------------------------------------------------
     // PERFORMANCE / SCALABILITY
     // ------------------------------------------------------------------

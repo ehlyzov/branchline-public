@@ -47,7 +47,7 @@ transformDecl    ::= annotation* **TRANSFORM** IDENTIFIER? paramList?
 
 annotation       ::= **@** IDENTIFIER                                        ;
 transformMode    ::= "{" ( **stream** | **buffer** ) "}"                    ;
-transformSignature ::= ":" typeRef? "->" typeRef?                            ;
+transformSignature ::= ":" typeRef "->" typeRef                              ;
 
 #---------------------------------------------------------------------------
 # Shared memory
