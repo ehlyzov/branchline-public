@@ -4,9 +4,9 @@ title: Lexical Structure
 
 # Lexical Structure
 
-This page outlines the tokens recognized by the Branchline lexer. Tokens are grouped into operators & punctuators, literals, and keywords.
+Tokens recognized by the Branchline lexer: operators, literals, and keywords.
 
-## Operators & Punctuators
+## Operators and punctuators
 
 | Token(s) | Lexeme(s) | Example |
 |---|---|---|
@@ -46,17 +46,12 @@ This page outlines the tokens recognized by the Branchline lexer. Tokens are gro
 
 ## Keywords
 
-Keywords are case-insensitive. A small set is hard-reserved; the rest are
-contextual and can be used as identifiers where a name is expected.
+Keywords are case-insensitive. A small set is hard-reserved; the rest are contextual and can be used as identifiers where a name is expected.
 
-Hard-reserved: `IF`, `THEN`, `ELSE`, `CASE`, `WHEN`, `FOR`, `EACH`, `IN`,
-`WHERE`, `TRY`, `CATCH`, `AWAIT`, `SUSPEND`, `TRUE`, `FALSE`, `NULL`.
-Use backticks to escape any keyword when you need it as a name (for example,
-`` `if` ``).
+Hard-reserved: `IF`, `THEN`, `ELSE`, `CASE`, `WHEN`, `FOR`, `EACH`, `IN`, `WHERE`, `TRY`, `CATCH`, `AWAIT`, `SUSPEND`, `TRUE`, `FALSE`, `NULL`.
+Use backticks to escape any keyword when you need it as a name (for example, `` `if` ``).
 
-Backtick identifiers accept any characters except a backtick or newline.
-
-### Statement Keywords
+### Statement keywords
 
 | Keyword | Description | Usage |
 |---|---|---|
@@ -71,8 +66,8 @@ Backtick identifiers accept any characters except a backtick or newline.
 | `INPUT` | Reference pipeline input. | [example](statements.md#input) |
 | `ABORT` | Abort execution. | [example](statements.md#abort) |
 | `THROW` | Throw an error. | [example](statements.md#throw) |
-| `TRY` / `CATCH` | Error handling expression/statement. | [example](statements.md#try) |
-| `RETRY` / `TIMES` / `BACKOFF` | Retry logic modifiers. | [example](statements.md#try) |
+| `TRY` / `CATCH` | Error handling. | [example](statements.md#try) |
+| `RETRY` / `TIMES` / `BACKOFF` | Retry modifiers. | [example](statements.md#try) |
 | `CALL` | Invoke a host function. | [example](statements.md#call) |
 | `SHARED` / `SINGLE` / `MANY` | Resource qualifiers. | [example](statements.md#shared) |
 | `FUNC` | Declare a function. | [example](statements.md#func) |
@@ -83,7 +78,7 @@ Backtick identifiers accept any characters except a backtick or newline.
 | `SET` / `APPEND` / `TO` | Assignment operations. | [example](statements.md#set) |
 | `INIT` | Initial value for a variable. | [example](statements.md#init) |
 
-### Expression Keywords
+### Expression keywords
 
 | Keyword | Description | Usage |
 |---|---|---|
@@ -95,23 +90,7 @@ Backtick identifiers accept any characters except a backtick or newline.
 | `NULL` | Null literal. | [example](expressions.md#literals) |
 | `UNION` | Union type expression. | [example](expressions.md#union) |
 
-## Special Token
-
-`EOF` marks the end of the input.
-
-# Summary
-
-Branchline uses a small set of tokens. Keywords are written in upper case and
-include `OUTPUT`, `TRANSFORM`, `BUFFER`, `SHARED`, `FUNC`, `TYPE`, `LET`,
-`IF`, `FOR`, `TRY`, `CALL`, `AWAIT`, and `SUSPEND`, among others
-as seen throughout the grammar.
-
-Names are expressed using identifiers:
-`funcDecl ::= FUNC IDENTIFIER "(" paramList? ")" funcBody`
-shows identifiers applied to declarations.
-
-Literals support numbers, strings, booleans, and null via the rule
-`literal ::= NUMBER | STRING | TRUE | FALSE | NULL`.
-
-Punctuation such as parentheses, braces, brackets, commas, and semicolons
-structure programs and appear in the production rules.
+## Related
+- [Statements](statements.md)
+- [Expressions](expressions.md)
+- [Grammar](grammar.md)
