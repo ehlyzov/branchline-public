@@ -1,1 +1,1 @@
-{"cli-test":{"label":"CLI Test","status":" ()","color":""},"vm-test":{"label":"VM Test","status":" ()","color":""},"interpreter-test":{"label":"Interpreter Test","status":" ()","color":""},"conformance-test":{"label":"Conformance Test","status":"passing (345 tests)","color":"44cc11"}}
+{"cli-test":{"label":"CLI Test","status":" ()","color":""},"vm-test":{"label":"VM Test","status":" ()","color":""},"interpreter-test":{"label":"Interpreter Test","status":" ()","color":""},"conformance-test":{"label":"Conformance Test","status":" ()","color":""}}
