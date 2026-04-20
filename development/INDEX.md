@@ -4,8 +4,10 @@ depends_on: []
 blocks: []
 supersedes: ['planning/current-research-tasks']
 superseded_by: []
-last_updated: 2026-02-27
+last_updated: 2026-04-20
 changelog:
+  - date: 2026-04-20
+    change: "Added AI-Friendly DSL umbrella proposal to coordinate canonical subset, machine interface, and AI authoring workflow work."
   - date: 2026-02-27
     change: "Completed Contract Type Precision Upgrade: latest-only contract stack, canonical inspect JSON, nullable precision, explicit closure preservation, domain propagation, and SemVer contract-diff gate."
   - date: 2026-02-26
@@ -104,6 +106,7 @@ This index is the canonical entry point for the /development knowledge base. All
 ## Status Index
 
 ### Proposed
+- [AI-Friendly DSL](ai/ai-friendly-dsl.md) -- umbrella plan for canonical subset, stable machine interface, and contract-first AI authoring workflow.
 - [Advanced CLI](tooling/advanced-cli.md) -- CLI+CI scripting plan.
 - [Implicit Transform (CLI)](tooling/implicit-transform-cli.md) -- opt-in single-transform wrapper mode.
 - [LLM Pipelines](ai/llm-pipelines.md) -- pipeline runtime spec.

@@ -1,9 +1,12 @@
 package io.github.ehlyzov.branchline.cli
 
 import io.github.ehlyzov.branchline.ArrayTypeRef
+import io.github.ehlyzov.branchline.BranchlineDiagnostic
+import io.github.ehlyzov.branchline.BranchlineFacade
+import io.github.ehlyzov.branchline.BranchlineInspectRequest
+import io.github.ehlyzov.branchline.BranchlineInspectResult
 import io.github.ehlyzov.branchline.EnumTypeRef
 import io.github.ehlyzov.branchline.NamedTypeRef
-import io.github.ehlyzov.branchline.Parser
 import io.github.ehlyzov.branchline.PrimitiveType
 import io.github.ehlyzov.branchline.PrimitiveTypeRef
 import io.github.ehlyzov.branchline.RecordTypeRef
@@ -37,6 +40,10 @@ import io.github.ehlyzov.branchline.schema.NullabilityStyle
 import io.github.ehlyzov.branchline.sema.SemanticWarning
 import io.github.ehlyzov.branchline.std.StdLib
 import io.github.ehlyzov.branchline.vm.BytecodeIO
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 public enum class PlatformKind { JVM, JS }
 
@@ -459,31 +466,23 @@ public object BranchlineCli {
             throw CliException("Inspect requires --contracts", kind = CliErrorKind.USAGE)
         }
         val source = readTextFileOrThrow(options.scriptPath)
-        val tokens = _root_ide_package_.io.github.ehlyzov.branchline.Lexer(source).lex()
-        val program = Parser(tokens, source).parse()
-        val hostFns = StdLib.fns
-        val analyzer = _root_ide_package_.io.github.ehlyzov.branchline.sema.SemanticAnalyzer(hostFns.keys)
-        analyzer.analyze(program)
-        val transforms = program.decls.filterIsInstance<TransformDecl>()
-        if (transforms.isEmpty()) {
-            throw CliException("Program must declare at least one TRANSFORM block", kind = CliErrorKind.INPUT)
-        }
-        val typeDecls = program.decls.filterIsInstance<TypeDecl>()
-        val contractBuilder = _root_ide_package_.io.github.ehlyzov.branchline.contract.TransformContractBuilder(
-            _root_ide_package_.io.github.ehlyzov.branchline.sema.TypeResolver(typeDecls),
-            hostFns.keys
-        )
-        val selected = selectTransforms(transforms, options.transformName)
-        val report = if (options.contractsFormat == ContractFormat.JSON) {
-            renderContractJson(
-                transforms = selected,
-                contractBuilder = contractBuilder,
+        val result = BranchlineFacade.inspect(
+            BranchlineInspectRequest(
+                programText = source,
+                transformName = options.transformName,
                 includeDebugMetadata = options.contractsDebug,
                 includeWitness = options.contractsWitness,
             )
-        } else {
-            renderContractInspection(selected, contractBuilder, analyzer.warnings)
+        )
+        if (!result.success) {
+            val diagnostic = result.diagnostics.firstOrNull()
+            throw CliException(
+                diagnostic?.message ?: "Inspect failed",
+                kind = inspectErrorKind(diagnostic),
+            )
         }
+        val report = if (options.contractsFormat == ContractFormat.JSON) result.contractsJson()
+        else renderInspectText(result)
         println(report)
         return ExitCode.SUCCESS.code
     }
@@ -1719,92 +1718,53 @@ private fun readStdinOrThrow(): String {
     }
 }
 
-private fun selectTransforms(
-    transforms: List<TransformDecl>,
-    name: String?,
-): List<TransformDecl> {
-    if (name == null) return transforms
-    val matches = transforms.filter { it.name == name }
-    if (matches.isEmpty()) {
-        throw CliException("Transform '$name' not found", kind = CliErrorKind.INPUT)
-    }
-    return matches
-}
-
-private fun renderContractInspection(
-    transforms: List<TransformDecl>,
-    contractBuilder: TransformContractBuilder,
-    warnings: List<SemanticWarning>,
-): String {
+private fun renderInspectText(result: BranchlineInspectResult): String {
     val sections = mutableListOf<String>()
-    transforms.forEach { transform ->
-        sections += renderTransformContractBlock(transform, contractBuilder)
+    result.transforms.forEach { transform ->
+        sections += renderInspectTransformBlock(transform)
     }
-    sections += renderContractWarnings(warnings)
+    sections += renderInspectWarnings(result.warnings)
     return sections.joinToString("\n\n").trim()
 }
 
-private fun renderContractJson(
-    transforms: List<TransformDecl>,
-    contractBuilder: TransformContractBuilder,
-    includeDebugMetadata: Boolean,
-    includeWitness: Boolean,
-): String {
-    val entries = transforms.map { transform ->
-        renderContractJsonEntry(
-            transform = transform,
-            contractBuilder = contractBuilder,
-            includeDebugMetadata = includeDebugMetadata,
-            includeWitness = includeWitness,
-        )
-    }
-    val payload = if (entries.size == 1) entries.first() else mapOf("transforms" to entries)
-    return formatJson(payload, pretty = true)
-}
-
-private fun renderContractJsonEntry(
-    transform: TransformDecl,
-    contractBuilder: TransformContractBuilder,
-    includeDebugMetadata: Boolean,
-    includeWitness: Boolean,
-): Map<String, Any?> {
-    val name = transform.name ?: "<anonymous>"
-    val contract = contractBuilder.build(transform)
-    val payload = linkedMapOf<String, Any?>(
-        "name" to name,
-        "source" to contract.source.name.lowercase(),
-        "input" to ContractJsonRenderer.inputElement(contract, includeDebugMetadata),
-        "output" to ContractJsonRenderer.outputElement(contract, includeDebugMetadata),
-    )
-    if (includeWitness) {
-        val witness = ContractWitnessGenerator.generate(contract)
-        payload["witness"] = mapOf(
-            "input" to witness.input,
-            "output" to witness.output,
-        )
-    }
-    return payload
-}
-
-private fun renderTransformContractBlock(
-    transform: TransformDecl,
-    contractBuilder: TransformContractBuilder,
+private fun renderInspectTransformBlock(
+    transform: io.github.ehlyzov.branchline.BranchlineInspectTransform,
 ): String {
     val lines = mutableListOf<String>()
-    val name = transform.name ?: "<anonymous>"
-    lines += "Transform: $name"
-    val explicitContract = contractBuilder.buildExplicitContract(transform)
+    lines += "Transform: ${transform.name}"
+    val explicitContract = transform.explicitContract
     if (explicitContract == null) {
         lines += "  Explicit contract: none (no signature)"
     } else {
         lines += "  Explicit contract:"
-        lines += "    Signature: ${renderSignature(transform.signature)}"
-        lines += renderContractDetails(explicitContract, "    ")
+        lines += indentJson(explicitContract, "    ")
     }
-    val inferredContract = contractBuilder.buildInferredContract(transform)
     lines += "  Inferred contract:"
-    lines += renderContractDetails(inferredContract, "    ")
+    lines += indentJson(transform.inferredContract, "    ")
     return lines.joinToString("\n")
+}
+
+private fun renderInspectWarnings(warnings: List<BranchlineDiagnostic>): String {
+    if (warnings.isEmpty()) return ""
+    val lines = mutableListOf("Warnings:")
+    warnings.forEach { warning ->
+        lines += "  - ${warning.message}"
+    }
+    return lines.joinToString("\n")
+}
+
+private fun indentJson(
+    payload: JsonObject,
+    indent: String,
+): String = prettyJson(payload).lineSequence().joinToString("\n") { line -> "$indent$line" }
+
+private fun prettyJson(payload: JsonElement): String =
+    Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), payload)
+
+private fun inspectErrorKind(diagnostic: BranchlineDiagnostic?): CliErrorKind = when (diagnostic?.code) {
+    "no_transform_blocks", "transform_not_found" -> CliErrorKind.INPUT
+    "parse_error", "semantic_error" -> CliErrorKind.RUNTIME
+    else -> CliErrorKind.RUNTIME
 }
 
 private fun renderSignature(signature: TransformSignature?): String {
