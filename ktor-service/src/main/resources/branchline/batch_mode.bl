@@ -1,0 +1,21 @@
+TRANSFORM DetectBatchMode(
+    input: {
+        items: [{
+            transactionId: string,
+        }],
+    }
+) -> {
+    mode: string,
+    total: number,
+    uniqueTransactions: number,
+} {
+    LET items = LISTIFY(input.items);
+    LET uniqueByTransaction = DISTINCT_BY(items, "transactionId");
+    LET uniqueMode = LENGTH(uniqueByTransaction) == LENGTH(items);
+
+    OUTPUT {
+        mode: IF uniqueMode THEN "UNIQUE_BATCH" ELSE "SEQUENTIAL_FALLBACK",
+        total: LENGTH(items),
+        uniqueTransactions: LENGTH(uniqueByTransaction),
+    };
+}
