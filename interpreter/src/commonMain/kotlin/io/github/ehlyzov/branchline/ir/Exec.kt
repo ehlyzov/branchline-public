@@ -685,11 +685,15 @@ class Exec(
 
     private fun stringify(v: Any?): Any? = when (v) {
         null -> null
-        is Map<*, *> -> LinkedHashMap<String, Any?>().apply {
+        is Map<*, *> -> LinkedHashMap<String, Any?>(v.size).apply {
             for ((k, vv) in v) put(k.toString(), stringify(vv))
         }
 
-        is List<*> -> v.map { stringify(it) }
+        is List<*> -> {
+            val out = ArrayList<Any?>(v.size)
+            for (item in v) out.add(stringify(item))
+            out
+        }
         else -> v
     }
 
@@ -1243,45 +1247,33 @@ class Exec(
     }
 }
 
-private const val NUMERIC_SITE_VARIANT_LIMIT = 4
+private val NUMERIC_KIND_COUNT = NumericKind.values().size
 
 private class NumericBinarySite(
     private val op: TokenType,
 ) {
-    private val variants: MutableList<NumericVariant> = ArrayList(NUMERIC_SITE_VARIANT_LIMIT)
-    private var megamorphic: Boolean = false
+    // Fixed-size dispatch table indexed by leftKind.ordinal * N + rightKind.ordinal.
+    // O(1) lookup replaces the previous polymorphic-inline-cache linear scan.
+    private val cache: Array<NumericVariant?> = arrayOfNulls(NUMERIC_KIND_COUNT * NUMERIC_KIND_COUNT)
 
     fun eval(left: Any?, right: Any?): Any {
         val leftKind = numericKindOf(left) ?: error("$op expects numeric operands")
         val rightKind = numericKindOf(right) ?: error("$op expects numeric operands")
-        if (!megamorphic) {
-            for (variant in variants) {
-                if (variant.matches(leftKind, rightKind)) {
-                    return variant.eval(left, right)
-                }
-            }
-            val variant = createNumericVariant(op, leftKind, rightKind)
-            if (variant != null) {
-                if (variants.size < NUMERIC_SITE_VARIANT_LIMIT) {
-                    variants.add(variant)
-                    return variant.eval(left, right)
-                }
-                megamorphic = true
-                return evalGenericNumeric(op, left, right)
-            }
+        val idx = leftKind.ordinal * NUMERIC_KIND_COUNT + rightKind.ordinal
+        val cached = cache[idx]
+        if (cached != null) return cached.eval(left, right)
+        val variant = createNumericVariant(op, leftKind, rightKind)
+        if (variant != null) {
+            cache[idx] = variant
+            return variant.eval(left, right)
         }
         return evalGenericNumeric(op, left, right)
     }
 }
 
-private data class NumericVariant(
-    private val leftKind: NumericKind,
-    private val rightKind: NumericKind,
+private class NumericVariant(
     val eval: (Any?, Any?) -> Any,
-) {
-    fun matches(left: NumericKind, right: NumericKind): Boolean =
-        left == leftKind && right == rightKind
-}
+)
 
 private fun createNumericVariant(
     op: TokenType,
@@ -1302,35 +1294,35 @@ private fun createNumericVariant(
 private fun createAddVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 addIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) + (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) + (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) + bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) + bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) + (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) + (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) + (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) + bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) + (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) + (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) + (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() + (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() + (r as BLBigDec) }
         else -> null
     }
 }
@@ -1338,35 +1330,35 @@ private fun createAddVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createSubVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 subIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) - (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) - (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) - bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) - bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) - (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) - (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) - (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) - bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) - (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) - (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) - (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() - (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() - (r as BLBigDec) }
         else -> null
     }
 }
@@ -1374,35 +1366,35 @@ private fun createSubVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createMulVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 mulIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) * (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) * (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) * bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) * bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) * (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) * (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) * (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) * bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) * (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) * (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) * (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() * (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() * (r as BLBigDec) }
         else -> null
     }
 }
@@ -1410,17 +1402,17 @@ private fun createMulVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createDivVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) / (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) / bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) / (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) / (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) / (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() / (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() / (r as BLBigDec) }
         leftKind != NumericKind.BD && rightKind != NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 val divisor = toDoubleValue(r)
                 require(divisor != 0.0) { "Division by zero" }
                 toDoubleValue(l) / divisor
@@ -1432,15 +1424,15 @@ private fun createDivVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createIDivVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 idivIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) / (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) / (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) / bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) / bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) / (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) / (r as BLBigInt) }
         else -> null
     }
 }
@@ -1448,29 +1440,29 @@ private fun createIDivVariant(leftKind: NumericKind, rightKind: NumericKind): Nu
 private fun createRemVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) % (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) % bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) % (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) % (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) % (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() % (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() % (r as BLBigDec) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) % (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) % (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) % bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) % bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) % (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) % (r as BLBigInt) }
         leftKind == NumericKind.F || rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 val divisor = toDoubleValue(r)
                 require(divisor != 0.0) { "Division by zero" }
                 toDoubleValue(l) % divisor
             }
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 remIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         else -> null

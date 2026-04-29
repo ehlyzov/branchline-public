@@ -28,13 +28,18 @@ private fun keysSharedAccess(args: List<Any?>): Boolean =
 private fun fnKEYS(args: List<Any?>): Any {
     require(args.size == 1) { "KEYS(coll)" }
     return when (val coll = args[0]) {
-        is List<*> -> coll.indices.toList()
-        is Map<*, *> -> coll.keys.toList()
+        is List<*> -> {
+            val size = coll.size
+            val out = ArrayList<Int>(size)
+            for (i in 0 until size) out.add(i)
+            out
+        }
+        is Map<*, *> -> ArrayList<Any?>(coll.size).apply { addAll(coll.keys) }
         is SharedResourceHandle -> {
             val store = SharedStoreProvider.store ?: error("SharedStore is not configured")
             val snapshot = store.snapshot()[coll.name]
                 ?: error("Unknown shared resource: ${coll.name}")
-            snapshot.keys.toList()
+            ArrayList<Any?>(snapshot.size).apply { addAll(snapshot.keys) }
         }
         else -> error("KEYS: arg must be list or object")
     }
@@ -43,13 +48,20 @@ private fun fnKEYS(args: List<Any?>): Any {
 private fun fnVALUES(args: List<Any?>): Any {
     require(args.size == 1) { "VALUES(obj)" }
     val m = args[0] as? Map<*, *> ?: error("VALUES: arg must be object")
-    return m.values.toList()
+    return ArrayList<Any?>(m.size).apply { addAll(m.values) }
 }
 
 private fun fnENTRIES(args: List<Any?>): Any {
     require(args.size == 1) { "ENTRIES(obj)" }
     val m = args[0] as? Map<*, *> ?: error("ENTRIES: arg must be object")
-    return m.entries.map { e -> mapOf("key" to e.key!!, "value" to e.value) }
+    val out = ArrayList<Map<String, Any?>>(m.size)
+    for ((k, v) in m) {
+        val entry = LinkedHashMap<String, Any?>(2)
+        entry["key"] = k!!
+        entry["value"] = v
+        out.add(entry)
+    }
+    return out
 }
 
 private fun fnPUT(args: List<Any?>): Any {
