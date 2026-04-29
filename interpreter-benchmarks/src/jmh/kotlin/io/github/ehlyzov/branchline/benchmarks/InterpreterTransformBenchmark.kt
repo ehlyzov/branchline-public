@@ -31,6 +31,10 @@ public open class InterpreterTransformBenchmark {
     private lateinit var pathExec: Exec
     private lateinit var arrayExec: Exec
     private lateinit var transformExec: Exec
+    private lateinit var nestedPathSetExec: Exec
+    private lateinit var deepNestedSetExec: Exec
+    private lateinit var nestedAppendToExec: Exec
+    private lateinit var stdlibCascadeAppendExec: Exec
 
     @Setup(Level.Trial)
     public fun setup() {
@@ -39,6 +43,10 @@ public open class InterpreterTransformBenchmark {
         pathExec = buildExec(PATH_TRANSFORM)
         arrayExec = buildExec(ARRAY_COMP_TRANSFORM)
         transformExec = buildExec(TYPICAL_TRANSFORM)
+        nestedPathSetExec = buildExec(NESTED_PATH_SET)
+        deepNestedSetExec = buildExec(DEEP_NESTED_SET)
+        nestedAppendToExec = buildExec(NESTED_APPEND_TO)
+        stdlibCascadeAppendExec = buildExec(STDLIB_CASCADE_APPEND)
     }
 
     @Setup(Level.Invocation)
@@ -59,6 +67,46 @@ public open class InterpreterTransformBenchmark {
     @Benchmark
     public fun typicalTransform(bh: Blackhole) {
         bh.consume(transformExec.run(env))
+    }
+
+    /**
+     * T1.3 probe: single-segment SET inside FOR EACH. Each iteration triggers
+     * one withUpdated + bubbleUp of depth 1. Scales linearly with order count.
+     */
+    @Benchmark
+    public fun nestedPathSetInLoop(bh: Blackhole) {
+        bh.consume(nestedPathSetExec.run(env))
+    }
+
+    /**
+     * T1.3 probe: multi-segment SET inside nested FOR EACH. Each inner-loop
+     * iteration triggers withReplaced(items[]) + withUpdated(order) +
+     * withReplaced(orders[]) + ... walking the bubbleUp chain to the root.
+     * Quadratic-shaped allocation if copy is not amortized.
+     */
+    @Benchmark
+    public fun deepNestedSet(bh: Blackhole) {
+        bh.consume(deepNestedSetExec.run(env))
+    }
+
+    /**
+     * T1.3 probe: APPEND TO into a nested-path list inside a FOR EACH. Each
+     * iteration re-clones the basket map AND the basket.items list. Classical
+     * O(n^2) shape if path-update copy dominates.
+     */
+    @Benchmark
+    public fun nestedAppendTo(bh: Blackhole) {
+        bh.consume(nestedAppendToExec.run(env))
+    }
+
+    /**
+     * T1.3 control: stdlib REDUCE+APPEND copy chain. Bypasses bubbleUp/SET
+     * machinery entirely; isolates the stdlib-only portion of the persistent-
+     * update cost so the previous three benchmarks can be attributed correctly.
+     */
+    @Benchmark
+    public fun stdlibCascadeAppend(bh: Blackhole) {
+        bh.consume(stdlibCascadeAppendExec.run(env))
     }
 }
 
@@ -96,6 +144,53 @@ private val TYPICAL_TRANSFORM = """
         OUTPUT {
             orderCount: LENGTH(input.orders),
             total: total,
+        }
+    }
+""".trimIndent()
+
+// T1.3 probes: SET/APPEND on container-typed paths.
+
+private val NESTED_PATH_SET = """
+    TRANSFORM T {
+        FOR EACH order IN input.orders {
+            SET order.tax = order.total * 0.1;
+        }
+        OUTPUT {
+            orderCount: LENGTH(input.orders),
+        }
+    }
+""".trimIndent()
+
+private val DEEP_NESTED_SET = """
+    TRANSFORM T {
+        FOR EACH order IN input.orders {
+            FOR EACH item IN order.items {
+                SET item.price = item.price + 1;
+            }
+        }
+        OUTPUT {
+            orderCount: LENGTH(input.orders),
+        }
+    }
+""".trimIndent()
+
+private val NESTED_APPEND_TO = """
+    TRANSFORM T {
+        LET basket = { items: [] };
+        FOR EACH order IN input.orders {
+            APPEND TO basket.items order.id;
+        }
+        OUTPUT {
+            count: LENGTH(basket.items),
+        }
+    }
+""".trimIndent()
+
+private val STDLIB_CASCADE_APPEND = """
+    TRANSFORM T {
+        LET acc = REDUCE(input.orders, [], (a, order) -> APPEND(a, order.id));
+        OUTPUT {
+            count: LENGTH(acc),
         }
     }
 """.trimIndent()
