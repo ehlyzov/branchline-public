@@ -277,68 +277,37 @@ class Exec(
         val hadBinding = bindingScope != null
         val prev = if (hadBinding) bindingScope.getLocal(e.varName) else null
         val target = bindingScope ?: env
-        val out = when (iterVal) {
-            is List<*> -> {
-                val size = iterVal.size
-                val listOut = if (e.where == null) ArrayList<Any?>(size) else ArrayList()
-                if (e.where == null) {
-                    for (i in 0 until size) {
-                        target.setLocal(e.varName, iterVal[i])
-                        listOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (i in 0 until size) {
-                        target.setLocal(e.varName, iterVal[i])
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        listOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                listOut
+
+        val iter: Iterable<Any?> = asIterableForLoop(iterVal)
+            ?: error("Array comprehension expects list/iterable/sequence")
+        val initialCapacity = if (e.where == null && iterVal is Collection<*>) iterVal.size else 0
+        val out = ArrayList<Any?>(initialCapacity)
+
+        if (e.where == null) {
+            for (item in iter) {
+                target.setLocal(e.varName, item)
+                out.add(evalExpr(e.mapExpr, env))
             }
-            is Iterable<*> -> {
-                val iterOut = if (e.where == null && iterVal is Collection<*>) {
-                    ArrayList<Any?>(iterVal.size)
-                } else {
-                    ArrayList()
-                }
-                if (e.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                iterOut
+        } else {
+            for (item in iter) {
+                target.setLocal(e.varName, item)
+                if (!evalExpr(e.where, env).asBool()) continue
+                out.add(evalExpr(e.mapExpr, env))
             }
-            is Sequence<*> -> {
-                val iterOut = ArrayList<Any?>()
-                if (e.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                iterOut
-            }
-            else -> error("Array comprehension expects list/iterable/sequence")
         }
+
         if (hadBinding) {
             target.setLocal(e.varName, prev)
         } else {
             env.removeLocal(e.varName)
         }
         return out
+    }
+
+    private fun asIterableForLoop(value: Any?): Iterable<Any?>? = when (value) {
+        is Iterable<*> -> value
+        is Sequence<*> -> value.asIterable()
+        else -> null
     }
 
     private fun handleUnary(e: UnaryExpr, env: Env): Any? = when (e.token.type) {
@@ -1152,126 +1121,21 @@ class Exec(
         val useFastPath = canFastPathForEachBody(n.body)
 
         val iterVal = evalExpr(n.iterable, env)
-        when (iterVal) {
-            is List<*> -> {
-                val size = iterVal.size
-                if (n.where == null) {
-                    for (i in 0 until size) {
-                        target.setLocal(n.varName, iterVal[i])
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (i in 0 until size) {
-                        target.setLocal(n.varName, iterVal[i])
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
+        val iter: Iterable<Any?> = asIterableForLoop(iterVal)
+            ?: error("FOR EACH expects list/iterable/sequence")
+
+        for (item in iter) {
+            target.setLocal(n.varName, item)
+            if (n.where != null && !evalExpr(n.where, env).asBool()) continue
+            if (useFastPath) {
+                execObjectNoReturn(n.body, env, out)
+            } else {
+                val res = execObject(n.body, env, out)
+                if (res.returned) {
+                    if (hadBinding) target.setLocal(n.varName, prev) else env.removeLocal(n.varName)
+                    return res
                 }
             }
-            is Iterable<*> -> {
-                if (n.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            is Sequence<*> -> {
-                if (n.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else -> error("FOR EACH expects list/iterable/sequence")
         }
 
         if (hadBinding) target.setLocal(n.varName, prev) else env.removeLocal(n.varName)
