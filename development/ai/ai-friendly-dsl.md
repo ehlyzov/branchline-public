@@ -4,8 +4,10 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-04-20
+last_updated: 2026-04-30
 changelog:
+  - date: 2026-04-30
+    change: "Started Normalization MVP slice under M3: AST renderer, BranchlineFacade.inspect normalizedSource population, and bl inspect --normalized flag."
   - date: 2026-04-20
     change: "Added umbrella proposal for AI-friendly DSL priorities, machine-facing APIs, and contract-first authoring workflow."
 ---
@@ -99,6 +101,17 @@ The concrete starting slice for this milestone is **Inspect Facade MVP**: move t
 
 ## Milestone M3: AI Authoring Loop
 Define the contract-first workflow that an AI agent should follow when generating or repairing Branchline.
+
+### Active slice: Normalization MVP (started 2026-04-30)
+- Renderer-only canonicalization: `BranchlineFacade.inspect` now populates `normalizedSource` when `includeNormalizedSource = true` and the program is `COMPATIBLE`.
+- CLI surface: `bl inspect --normalized` adds the canonical text to both `--contracts` and `--contracts-json` output paths. The flag is opt-in; existing inspect output is byte-stable.
+- Canonical rules implemented today:
+  - `row` input alias rewrites to `input` on output.
+  - Statements emitted without trailing semicolons.
+  - `FOR` and `FOR EACH` both render as `FOR EACH`.
+  - Deterministic 4-space indentation, one statement per line, stable single-line vs multi-line bracket layout (80-char budget).
+- **Non-goals in this slice**: no `IF`/`CASE` rewrites, no loop/comprehension rewrites, no comment preservation (the lexer drops comments before they reach the AST), no standalone `bl normalize` command, no parser/runtime semantics changes.
+- Renderer gaps surface as a `normalization_unsupported_node` warning; subset incompatibilities continue to use `unsupported_in_ai_subset` and produce no normalized source.
 
 ### Workflow
 1. accept input schema or representative sample input,

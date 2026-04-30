@@ -286,6 +286,113 @@ public class CliIntegrationTest {
     }
 
     @Test
+    fun inspectNormalizedTextIncludesNormalizedSourceForCompatibleProgram() {
+        val script = """
+            TRANSFORM Main {
+                LET greeting = "hi " + row.name;
+                OUTPUT { greeting: greeting }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-norm", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+                "--normalized",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Normalized source:"))
+        assertTrue(result.stdout.contains("input.name"))
+        assertTrue(!result.stdout.contains("row.name"))
+        assertTrue(!result.stdout.contains(";"))
+    }
+
+    @Test
+    fun inspectNormalizedJsonAddsNormalizedSourceField() {
+        val script = """
+            TRANSFORM Main {
+                OUTPUT { greeting: "hi " + input.name }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-norm-json", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts-json",
+                "--normalized",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        val payload = Json.parseToJsonElement(result.stdout).jsonObject
+        assertTrue(payload.containsKey("input"))
+        assertTrue(payload.containsKey("output"))
+        val normalized = payload["normalizedSource"]?.jsonPrimitive?.content
+            ?: error("missing normalizedSource")
+        assertTrue(normalized.contains("TRANSFORM Main"))
+        assertTrue(normalized.contains("OUTPUT"))
+    }
+
+    @Test
+    fun inspectContractsJsonWithoutNormalizedFlagOmitsNormalizedSource() {
+        val script = """
+            TRANSFORM Main {
+                OUTPUT { greeting: "hi " + input.name }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-norm-omit", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts-json",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        val payload = Json.parseToJsonElement(result.stdout).jsonObject
+        assertTrue(!payload.containsKey("normalizedSource"))
+    }
+
+    @Test
+    fun inspectNormalizedOnIncompatibleProgramOmitsNormalizedSection() {
+        val script = """
+            SHARED cache SINGLE
+
+            TRANSFORM Main {
+                LET value = AWAIT cache.user;
+                OUTPUT { value: value }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-norm-incompat", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+                "--normalized",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Subset compatibility: INCOMPATIBLE"))
+        assertTrue(result.stdout.contains("AI subset blockers:"))
+        assertTrue(!result.stdout.contains("Normalized source:"))
+    }
+
+    @Test
     fun inspectTextShowsBlockingAiSubsetDiagnostics() {
         val script = """
             SHARED cache SINGLE

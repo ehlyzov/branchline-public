@@ -6,6 +6,8 @@ import io.github.ehlyzov.branchline.contract.TransformContract
 import io.github.ehlyzov.branchline.contract.TransformContractBuilder
 import io.github.ehlyzov.branchline.json.JsonNumberMode
 import io.github.ehlyzov.branchline.json.toJsonElement
+import io.github.ehlyzov.branchline.normalize.AstRenderer
+import io.github.ehlyzov.branchline.normalize.UnsupportedNodeException
 import io.github.ehlyzov.branchline.sema.SemanticAnalyzer
 import io.github.ehlyzov.branchline.sema.SemanticException
 import io.github.ehlyzov.branchline.sema.SemanticWarning
@@ -26,6 +28,7 @@ public data class BranchlineInspectRequest(
     val transformName: String? = null,
     val includeDebugMetadata: Boolean = false,
     val includeWitness: Boolean = false,
+    val includeNormalizedSource: Boolean = false,
 )
 
 @Serializable
@@ -136,20 +139,39 @@ public object BranchlineFacade {
             }
             val warningDiagnostics = analyzer.warnings.map(::warningDiagnostic)
             val subsetDiagnostics = analyzeAiSubset(program, selected)
+            val compatibility = if (subsetDiagnostics.isEmpty()) {
+                BranchlineSubsetCompatibility.COMPATIBLE
+            } else {
+                BranchlineSubsetCompatibility.INCOMPATIBLE
+            }
+            val normalizationDiagnostics = mutableListOf<BranchlineDiagnostic>()
+            val normalizedSource = if (
+                request.includeNormalizedSource &&
+                compatibility == BranchlineSubsetCompatibility.COMPATIBLE
+            ) {
+                try {
+                    AstRenderer.renderProgram(program)
+                } catch (ex: UnsupportedNodeException) {
+                    normalizationDiagnostics += BranchlineDiagnostic(
+                        code = "normalization_unsupported_node",
+                        message = "Cannot canonicalize node '${ex.nodeKind}': ${ex.detail}",
+                        severity = BranchlineDiagnosticSeverity.WARNING,
+                    )
+                    null
+                }
+            } else {
+                null
+            }
             BranchlineInspectResult(
                 success = true,
                 transforms = inspectTransforms,
-                diagnostics = subsetDiagnostics + warningDiagnostics,
-                warnings = warningDiagnostics,
+                diagnostics = subsetDiagnostics + warningDiagnostics + normalizationDiagnostics,
+                warnings = warningDiagnostics + normalizationDiagnostics,
                 featureUsage = BranchlineFeatureUsageSummary(
                     features = collectFeatureUsage(program, selected)
                 ),
-                subsetCompatibility = if (subsetDiagnostics.isEmpty()) {
-                    BranchlineSubsetCompatibility.COMPATIBLE
-                } else {
-                    BranchlineSubsetCompatibility.INCOMPATIBLE
-                },
-                normalizedSource = null,
+                subsetCompatibility = compatibility,
+                normalizedSource = normalizedSource,
             )
         } catch (ex: ParseException) {
             failedInspectResult(parseDiagnostic(ex))

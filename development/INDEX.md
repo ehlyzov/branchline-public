@@ -4,8 +4,14 @@ depends_on: []
 blocks: []
 supersedes: ['planning/current-research-tasks']
 superseded_by: []
-last_updated: 2026-04-20
+last_updated: 2026-04-30
 changelog:
+  - date: 2026-04-30
+    change: "Started Normalization MVP slice under AI-Friendly DSL M3: AstRenderer + BranchlineFacade normalizedSource population + bl inspect --normalized flag."
+  - date: 2026-04-30
+    change: "Completed Service Knowledge Contour Bootstrap with startup docs, canonical service map, verification contract, generated overlays, and contour lifecycle scripts."
+  - date: 2026-04-30
+    change: "Started Service Knowledge Contour Bootstrap to add the minimal startup, service-map, verification, generated overlay, and contour lifecycle script layer."
   - date: 2026-04-20
     change: "Added AI-Friendly DSL umbrella proposal to coordinate canonical subset, machine interface, and AI authoring workflow work."
   - date: 2026-02-27
@@ -129,6 +135,7 @@ This index is the canonical entry point for the /development knowledge base. All
 - [Interpreter Performance Tasks](perf/interpreter-performance-tasks.md) -- perf task backlog.
 
 ### Implemented
+- [Service Knowledge Contour Bootstrap](docs/service-knowledge-contour-bootstrap.md) -- minimal repository contour and lifecycle scripts.
 - [Contract Type Precision Upgrade](language/contract-type-precision-upgrade.md) -- latest-only contract stack hard-cut plus nullable precision, closure/domain fixes, and SemVer contract-diff gates.
 - [CLI Rollout](tooling/cli-rollout.md) -- JVM/JS CLI shipped.
 - [Playground Examples Modernization](docs/playground-examples-modernization.md) -- aggressive modern-style rewrite of all playground examples with validation coverage.

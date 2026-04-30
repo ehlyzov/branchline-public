@@ -44,6 +44,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 
 public enum class PlatformKind { JVM, JS }
 
@@ -117,6 +120,7 @@ public data class InspectOptions(
     val contractsFormat: ContractFormat,
     val contractsDebug: Boolean,
     val contractsWitness: Boolean,
+    val includeNormalizedSource: Boolean,
 )
 
 public data class SchemaOptions(
@@ -233,7 +237,7 @@ public object BranchlineCli {
                   [--jobs <n>] [--summary-transform <name>] [--trace] [--trace-format text|json]
                   [--contracts off|warn|strict]
               bl inspect <script.bl> --contracts [--transform <name>] [--contracts-json]
-                  [--contracts-witness] [--contracts-debug]
+                  [--contracts-witness] [--contracts-debug] [--normalized]
               bl schema <script.bl> <TYPE_NAME> [--nullable] [--output <schema.json>]
               bl schema <script.bl> --all [--nullable] [--output <schema.json>]
               bl schema --import <schema.json> --name <TYPE_NAME> [--output <types.bl>]
@@ -277,6 +281,7 @@ public object BranchlineCli {
               --contracts-json    (inspect) emit contract JSON instead of the text report.
               --contracts-witness (inspect) include synthesized strict-valid witness payloads in JSON output.
               --contracts-debug   (inspect) include debug metadata (origin and spans) in contract JSON output.
+              --normalized        (inspect) include canonicalized program source for AI-subset compatible programs.
               --all               (schema) emit a ${'$'}defs block with all TYPE declarations.
               --nullable          (schema) use 'nullable: true' instead of 'type: [\"null\", ...]'.
               --import PATH       (schema) read a JSON Schema document and emit TYPE declarations.
@@ -472,6 +477,7 @@ public object BranchlineCli {
                 transformName = options.transformName,
                 includeDebugMetadata = options.contractsDebug,
                 includeWitness = options.contractsWitness,
+                includeNormalizedSource = options.includeNormalizedSource,
             )
         )
         if (!result.success) {
@@ -481,8 +487,11 @@ public object BranchlineCli {
                 kind = inspectErrorKind(diagnostic),
             )
         }
-        val report = if (options.contractsFormat == ContractFormat.JSON) result.contractsJson()
-        else renderInspectText(result)
+        val report = if (options.contractsFormat == ContractFormat.JSON) {
+            renderInspectJsonWithNormalized(result, options.includeNormalizedSource)
+        } else {
+            renderInspectText(result, options.includeNormalizedSource)
+        }
         println(report)
         return ExitCode.SUCCESS.code
     }
@@ -1143,6 +1152,7 @@ public object BranchlineCli {
         var contractsFormat = ContractFormat.TEXT
         var contractsDebug = false
         var contractsWitness = false
+        var normalized = false
         var idx = startIndex
         while (idx < args.size) {
             val token = args[idx]
@@ -1166,6 +1176,11 @@ public object BranchlineCli {
                     showContracts = true
                     idx += 1
                 }
+                token == "--normalized" -> {
+                    normalized = true
+                    showContracts = true
+                    idx += 1
+                }
                 token == "--transform" && idx + 1 < args.size -> {
                     transform = args[idx + 1]
                     idx += 2
@@ -1186,6 +1201,7 @@ public object BranchlineCli {
             contractsFormat = contractsFormat,
             contractsDebug = contractsDebug,
             contractsWitness = contractsWitness,
+            includeNormalizedSource = normalized,
         )
     }
 
@@ -1718,7 +1734,10 @@ private fun readStdinOrThrow(): String {
     }
 }
 
-private fun renderInspectText(result: BranchlineInspectResult): String {
+private fun renderInspectText(
+    result: BranchlineInspectResult,
+    includeNormalizedSource: Boolean = false,
+): String {
     val sections = mutableListOf<String>()
     sections += renderInspectSummary(result)
     result.transforms.forEach { transform ->
@@ -1726,7 +1745,24 @@ private fun renderInspectText(result: BranchlineInspectResult): String {
     }
     renderInspectSubsetBlockers(result.diagnostics)?.let { sections += it }
     renderInspectWarnings(result.warnings)?.let { sections += it }
+    if (includeNormalizedSource) {
+        result.normalizedSource?.let { sections += "Normalized source:\n$it" }
+    }
     return sections.joinToString("\n\n").trim()
+}
+
+private fun renderInspectJsonWithNormalized(
+    result: BranchlineInspectResult,
+    includeNormalizedSource: Boolean,
+): String {
+    val baseJson = result.contractsJson()
+    if (!includeNormalizedSource || result.normalizedSource == null) return baseJson
+    val element = Json.parseToJsonElement(baseJson).jsonObject
+    val merged = buildJsonObject {
+        element.forEach { (key, value) -> put(key, value) }
+        put("normalizedSource", JsonPrimitive(result.normalizedSource!!))
+    }
+    return Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), merged)
 }
 
 private fun renderInspectSummary(result: BranchlineInspectResult): String {
