@@ -26,11 +26,23 @@ public open class InterpreterTransformBenchmark {
     @Param("small", "medium", "large")
     public lateinit var dataset: String
 
+    /**
+     * `hash` keeps the existing LinkedHashMap/ArrayList input.
+     * `persistent` recursively converts the input to kotlinx
+     * PersistentMap/PersistentList. The interpreter reads via the read-only
+     * Map/List interfaces, so no runtime change is required to compare —
+     * the deltas reveal the read-overhead cost of switching to persistent
+     * collections for runtime values.
+     */
+    @Param("hash", "persistent")
+    public lateinit var collectionType: String
+
     private lateinit var input: Map<String, Any?>
     private lateinit var env: MutableMap<String, Any?>
     private lateinit var pathExec: Exec
     private lateinit var arrayExec: Exec
     private lateinit var transformExec: Exec
+    private lateinit var deepNestedReadExec: Exec
     private lateinit var nestedPathSetExec: Exec
     private lateinit var deepNestedSetExec: Exec
     private lateinit var nestedAppendToExec: Exec
@@ -39,10 +51,16 @@ public open class InterpreterTransformBenchmark {
     @Setup(Level.Trial)
     public fun setup() {
         val size = datasetSizeFromParam(dataset)
-        input = BenchDatasets.buildInput(size)
+        val raw = BenchDatasets.buildInput(size)
+        input = when (collectionType) {
+            "hash" -> raw
+            "persistent" -> BenchDatasets.toPersistentInput(raw)
+            else -> error("Unknown collectionType: $collectionType")
+        }
         pathExec = buildExec(PATH_TRANSFORM)
         arrayExec = buildExec(ARRAY_COMP_TRANSFORM)
         transformExec = buildExec(TYPICAL_TRANSFORM)
+        deepNestedReadExec = buildExec(DEEP_NESTED_READ)
         nestedPathSetExec = buildExec(NESTED_PATH_SET)
         deepNestedSetExec = buildExec(DEEP_NESTED_SET)
         nestedAppendToExec = buildExec(NESTED_APPEND_TO)
@@ -67,6 +85,17 @@ public open class InterpreterTransformBenchmark {
     @Benchmark
     public fun typicalTransform(bh: Blackhole) {
         bh.consume(transformExec.run(env))
+    }
+
+    /**
+     * Read-overhead probe: walks every order and every item, accumulating
+     * scalars into a local variable. No SET on container paths, so
+     * bubbleUp/withUpdated never fire — the cost is dominated by Map.get
+     * and List.get on input. Used to measure persistent-vs-hash read cost.
+     */
+    @Benchmark
+    public fun deepNestedRead(bh: Blackhole) {
+        bh.consume(deepNestedReadExec.run(env))
     }
 
     /**
@@ -144,6 +173,23 @@ private val TYPICAL_TRANSFORM = """
         OUTPUT {
             orderCount: LENGTH(input.orders),
             total: total,
+        }
+    }
+""".trimIndent()
+
+// Read-overhead probe: deep nested reads with no container-path mutation.
+
+private val DEEP_NESTED_READ = """
+    TRANSFORM T {
+        LET total = 0;
+        FOR EACH order IN input.orders {
+            FOR EACH item IN order.items {
+                SET total = total + item.qty + item.price;
+            }
+        }
+        OUTPUT {
+            total: total,
+            orderCount: LENGTH(input.orders),
         }
     }
 """.trimIndent()

@@ -10,6 +10,8 @@ changelog:
     change: "Initial audit of unoptimized code in the tree-walking interpreter."
   - date: 2026-04-29
     change: "T1.3 confirmed hot via targeted JMH probes (nestedPathSetInLoop, deepNestedSet, nestedAppendTo, stdlibCascadeAppend); baseline saved as perf/jmh/results-20260429-215437-t13-baseline.json."
+  - date: 2026-04-30
+    change: "T1.3 read-overhead probe: kotlinx-collections-immutable input shows max 1.31× slowdown on lookup-saturated synthetic case, 1.00-1.20× on realistic workloads. Migration viable; saved as perf/jmh/results-20260430-112239-t13-readoverhead.json."
 ---
 # Interpreter Optimization Audit (April 2026)
 
@@ -111,8 +113,39 @@ Feb 2026) свежим срезом по состоянию ветки `codex/co
    `gc.alloc.rate.norm` для nested-path SET кейсов на 1-2 порядка выше,
    чем у control'ов; `nestedAppendTo` показывает super-linear allocation
    (per-order alloc растёт 1.9× и 3.3× при 10× и 5× росте датасета).
+
+   **Read-overhead probe** (2026-04-30, baseline:
+   [perf/jmh/results-20260430-112239-t13-readoverhead.json](../../perf/jmh/results-20260430-112239-t13-readoverhead.json)):
+   тот же suite запущен на двух input'ах — стандартный LinkedHashMap/ArrayList
+   и input, рекурсивно сконвертированный в kotlinx PersistentMap/PersistentList
+   через `BenchDatasets.toPersistent`. Цель — оценить read-overhead до
+   принятия решения о миграции. Среднее (us/op, persistent / hash, large
+   dataset):
+
+   | benchmark | hash | persistent | ratio |
+   |---|---|---|---|
+   | `pathExpressions` (4 deep lookups, lookup-saturated) | 0.29 | 0.38 | **1.31×** |
+   | `arrayComprehensions` | 23.78 | 28.51 | 1.20× |
+   | `deepNestedRead` (nested loop, scalar SET) | 1093.87 | 1096.17 | **1.00×** |
+   | `typicalTransform` | 27.12 | 30.22 | 1.11× |
+   | `nestedPathSetInLoop` | 55.13 | 72.00 | 1.31× |
+   | `deepNestedSet` | 1381.91 | 1287.63 | 0.93× |
+   | `nestedAppendTo` | 86.98 | 84.21 | 0.97× |
+   | `stdlibCascadeAppend` | 71.04 | 67.51 | 0.95× |
+
+   **Вывод**: read-overhead PersistentMap приемлем. Худший кейс
+   (`pathExpressions`) даёт +90ns на вызов — синтетический, lookup-saturated.
+   Реалистичные смешанные workloads (`deepNestedRead`, `arrayComprehensions`)
+   укладываются в 1.00-1.20×. SET-кейсы НЕ показали ожидаемого выигрыша
+   — потому что бенчмарк конвертирует только input; интерпретатор внутри
+   `withUpdated`/`withReplaced` всё равно строит LinkedHashMap/ArrayList,
+   так что после первого SET значения становятся mutable. Реализация T1.3
+   потребует переноса persistent-операций В runtime (не только на input).
+
    Решение об оптимизации — отдельной веткой; опции в
    [zazzy-kindling-raven.md](https://example/internal-plan) Step 4.
+   Read-budget теперь измерен — миграция на kotlinx-collections-immutable
+   видится жизнеспособной.
 
 4. **[H] `listOf(src[i], i, src)` в FIND/SOME/EVERY/REDUCE — 1 список на итерацию**
    — [StdHofModule.kt:53-83](../../interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/std/StdHofModule.kt).
