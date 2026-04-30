@@ -2,6 +2,7 @@ package io.github.ehlyzov.branchline.std
 
 import kotlin.collections.ArrayDeque
 import io.github.ehlyzov.branchline.runtime.bignum.BLBigInt
+import kotlinx.collections.immutable.toPersistentList
 
 class StdCoreModule : StdModule {
     override fun register(r: StdRegistry) {
@@ -73,18 +74,11 @@ private fun fnPUT(args: List<Any?>): Any {
         is Map<*, *> -> clonePut(coll, asObjectKey(key), value)
         is List<*> -> {
             val i = asIndex(key)
+            val src = coll.toPersistentList()
             when {
-                i < coll.size -> ArrayList<Any?>(coll.size).apply {
-                    addAll(coll)
-                    this[i] = value
-                }
-
-                i == coll.size -> ArrayList<Any?>(coll.size + 1).apply {
-                    addAll(coll)
-                    add(value)
-                }
-
-                else -> error("PUT: index $i out of bounds 0..${coll.size}")
+                i < src.size -> src.set(i, value)
+                i == src.size -> src.add(value)
+                else -> error("PUT: index $i out of bounds 0..${src.size}")
             }
         }
 
@@ -101,10 +95,7 @@ private fun fnDELETE(args: List<Any?>): Any {
         is List<*> -> {
             val i = asIndex(key)
             require(i in 0 until coll.size) { "DELETE: index $i out of bounds 0..${coll.size - 1}" }
-            ArrayList<Any?>(coll.size - 1).apply {
-                addAll(coll.subList(0, i))
-                addAll(coll.subList(i + 1, coll.size))
-            }
+            coll.toPersistentList().removeAt(i)
         }
 
         else -> error("DELETE: unsupported collection")
@@ -185,19 +176,13 @@ private fun fnWALK(args: List<Any?>): Any {
 private fun fnAPPEND(args: List<Any?>): Any {
     require(args.size == 2) { "APPEND(list, value)" }
     val src = args[0] as? List<*> ?: error("APPEND: first arg must be list")
-    return ArrayList<Any?>(src.size + 1).apply {
-        addAll(src)
-        add(args[1])
-    }
+    return src.toPersistentList().add(args[1])
 }
 
 private fun fnPREPEND(args: List<Any?>): Any {
     require(args.size == 2) { "PREPEND(list, value)" }
     val src = args[0] as? List<*> ?: error("PREPEND: first arg must be list")
-    return ArrayList<Any?>(src.size + 1).apply {
-        add(args[1])
-        addAll(src)
-    }
+    return src.toPersistentList().add(0, args[1])
 }
 
 private fun fnCOLLECT(args: List<Any?>): Any {

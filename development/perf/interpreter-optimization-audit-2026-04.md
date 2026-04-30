@@ -12,6 +12,8 @@ changelog:
     change: "T1.3 confirmed hot via targeted JMH probes (nestedPathSetInLoop, deepNestedSet, nestedAppendTo, stdlibCascadeAppend); baseline saved as perf/jmh/results-20260429-215437-t13-baseline.json."
   - date: 2026-04-30
     change: "T1.3 read-overhead probe: kotlinx-collections-immutable input shows max 1.31× slowdown on lookup-saturated synthetic case, 1.00-1.20× on realistic workloads. Migration viable; saved as perf/jmh/results-20260430-112239-t13-readoverhead.json."
+  - date: 2026-04-30
+    change: "T1.3 list-only migration applied (withReplaced/withAppended/handleAppendVar in Exec.kt; fnPUT/fnDELETE list branches, fnAPPEND, fnPREPEND in StdCoreModule.kt all use kotlinx PersistentList). Verified: 5.0× allocation reduction and 1.55-1.83× throughput on nestedAppendTo and stdlibCascadeAppend (large dataset). No read-path regression. Map-heavy SET cases deferred (insertion-order requirement)."
 ---
 # Interpreter Optimization Audit (April 2026)
 
@@ -146,6 +148,33 @@ Feb 2026) свежим срезом по состоянию ветки `codex/co
    [zazzy-kindling-raven.md](https://example/internal-plan) Step 4.
    Read-budget теперь измерен — миграция на kotlinx-collections-immutable
    видится жизнеспособной.
+
+   **Применённое решение (2026-04-30, post-migration baseline:
+   [perf/jmh/results-20260430-143646-t13-postmigration.json](../../perf/jmh/results-20260430-143646-t13-postmigration.json))**:
+   list-only миграция на kotlinx PersistentList. Map оставлен на
+   LinkedHashMap, потому что 189 LinkedHashMap-сайтов и
+   `ConformXmlOutputOrderingTest` подтверждают опору языка на
+   insertion-order; PersistentHashMap (HAMT) его не сохраняет.
+   Изменения: `withReplaced` / `withAppended` / `handleAppendVar`
+   в [Exec.kt](../../interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/ir/Exec.kt),
+   `fnPUT(list)` / `fnDELETE(list)` / `fnAPPEND` / `fnPREPEND` в
+   [StdCoreModule.kt](../../interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/std/StdCoreModule.kt).
+   Конверсия ленивая — первая модификация переводит ArrayList в
+   PersistentList, последующие O(log32 N).
+
+   | benchmark (large) | pre us/op | post us/op | speedup | pre alloc | post alloc | reduction |
+   |---|---|---|---|---|---|---|
+   | nestedAppendTo | 87.0 | 55.8 | **1.55×** | 1.14 MB | 241 KB | **5.0×** |
+   | stdlibCascadeAppend | 71.0 | 38.8 | **1.83×** | 1.18 MB | 243 KB | **5.0×** |
+   | nestedPathSetInLoop | 55.1 | 62.6 | 1.14× (map-heavy, не покрыто) | 205 KB | 205 KB | 1.00× |
+   | deepNestedSet | 1382 | 1331 | 0.96× (map-heavy, не покрыто) | 3.33 MB | 3.33 MB | 1.00× |
+   | pathExpressions | 0.29 | 0.28 | 0.96× ✓ no read regression | 784 | 784 | 1.00× |
+   | arrayComprehensions | 23.78 | 23.41 | 0.98× ✓ no read regression | 32.8 KB | 32.8 KB | 1.00× |
+
+   Conformance не затронута (347 passed / 1 skipped). Map-heavy SET кейсы
+   остаются на full-copy — отдельный track при появлении ordered persistent
+   map (например, hand-rolled HAMT + insertion-order linked list, или
+   community-библиотека).
 
 4. **[H] `listOf(src[i], i, src)` в FIND/SOME/EVERY/REDUCE — 1 список на итерацию**
    — [StdHofModule.kt:53-83](../../interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/std/StdHofModule.kt).

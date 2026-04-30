@@ -65,6 +65,7 @@ import io.github.ehlyzov.branchline.std.blockingAwait
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.collections.LinkedHashMap
+import kotlinx.collections.immutable.toPersistentList
 
 /**
  * Executes an IR program and collects OUTPUT objects. Design goals:
@@ -754,18 +755,25 @@ class Exec(
             this[key] = newChild
         }
 
-    private fun List<*>.withReplaced(idx: Int, newChild: Any?): ArrayList<Any?> {
+    /**
+     * Persistent-list-aware list update. If `this` is already a PersistentList,
+     * uses its O(log32 N) `set`. Otherwise pays a one-time toPersistentList()
+     * conversion (the same O(N) the old ArrayList copy used to do) so that
+     * subsequent withReplaced/withAppended calls on the result are O(log N).
+     */
+    private fun List<*>.withReplaced(idx: Int, newChild: Any?): List<Any?> {
         require(idx in 0 until this.size) { "Index $idx out of bounds 0..${this.size - 1}" }
-        return ArrayList<Any?>(this.size).apply {
-            addAll(this@withReplaced)
-            this[idx] = newChild
-        }
+        return this.toPersistentList().set(idx, newChild)
     }
 
-    private fun List<*>.withAppended(value: Any?): ArrayList<Any?> =
-        ArrayList<Any?>(this.size + 1).apply {
-            addAll(this@withAppended)
-            add(value)
+    /**
+     * Persistent-list-aware list append. Same lazy-conversion pattern as
+     * withReplaced. Notably benefits APPEND-in-loop programs where the same
+     * list is repeatedly grown — each subsequent append is O(log32 N) instead
+     * of O(N) full clone.
+     */
+    private fun List<*>.withAppended(value: Any?): List<Any?> {
+        return this.toPersistentList().add(value)
     }
 
     // --- Properties → Map
@@ -1028,10 +1036,7 @@ class Exec(
             is List<*> -> cur
             else -> error("APPEND TO expects list in variable '${n.name}'")
         }
-        val appended = ArrayList<Any?>(base.size + 1).apply {
-            addAll(base)
-            add(evalExpr(n.value, env))
-        }
+        val appended = base.toPersistentList().add(evalExpr(n.value, env))
         env.setExisting(n.name, appended)
         emitPathWrite("APPEND", n.name, listOf(n.name), cur, appended)
     }
