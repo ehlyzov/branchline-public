@@ -1720,11 +1720,24 @@ private fun readStdinOrThrow(): String {
 
 private fun renderInspectText(result: BranchlineInspectResult): String {
     val sections = mutableListOf<String>()
+    sections += renderInspectSummary(result)
     result.transforms.forEach { transform ->
         sections += renderInspectTransformBlock(transform)
     }
-    sections += renderInspectWarnings(result.warnings)
+    renderInspectSubsetBlockers(result.diagnostics)?.let { sections += it }
+    renderInspectWarnings(result.warnings)?.let { sections += it }
     return sections.joinToString("\n\n").trim()
+}
+
+private fun renderInspectSummary(result: BranchlineInspectResult): String {
+    val lines = mutableListOf<String>()
+    lines += "Subset compatibility: ${result.subsetCompatibility}"
+    lines += if (result.featureUsage.features.isEmpty()) {
+        "Feature usage: none"
+    } else {
+        "Feature usage: ${result.featureUsage.features.joinToString(", ")}"
+    }
+    return lines.joinToString("\n")
 }
 
 private fun renderInspectTransformBlock(
@@ -1744,11 +1757,23 @@ private fun renderInspectTransformBlock(
     return lines.joinToString("\n")
 }
 
-private fun renderInspectWarnings(warnings: List<BranchlineDiagnostic>): String {
-    if (warnings.isEmpty()) return ""
+private fun renderInspectSubsetBlockers(diagnostics: List<BranchlineDiagnostic>): String? {
+    val blockers = diagnostics.filter { it.code == "unsupported_in_ai_subset" }
+    if (blockers.isEmpty()) return null
+    val lines = mutableListOf("AI subset blockers:")
+    blockers.forEach { blocker ->
+        val prefix = blocker.span?.let { "[${it.startLine}:${it.startColumn}] " } ?: ""
+        lines += "  - $prefix${blocker.message}"
+    }
+    return lines.joinToString("\n")
+}
+
+private fun renderInspectWarnings(warnings: List<BranchlineDiagnostic>): String? {
+    if (warnings.isEmpty()) return null
     val lines = mutableListOf("Warnings:")
     warnings.forEach { warning ->
-        lines += "  - ${warning.message}"
+        val prefix = warning.span?.let { "[${it.startLine}:${it.startColumn}] " } ?: ""
+        lines += "  - $prefix${warning.message}"
     }
     return lines.joinToString("\n")
 }

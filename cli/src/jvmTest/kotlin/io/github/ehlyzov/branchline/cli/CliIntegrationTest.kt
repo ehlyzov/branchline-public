@@ -260,6 +260,60 @@ public class CliIntegrationTest {
     }
 
     @Test
+    fun inspectTextShowsSubsetCompatibilityAndFeatureUsage() {
+        val script = """
+            TRANSFORM Main {
+                LET greeting = "hi " + input.name;
+                OUTPUT { greeting: greeting }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-text", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Subset compatibility: COMPATIBLE"))
+        assertTrue(result.stdout.contains("Feature usage:"))
+        assertTrue(result.stdout.contains("let"))
+        assertTrue(result.stdout.contains("output"))
+    }
+
+    @Test
+    fun inspectTextShowsBlockingAiSubsetDiagnostics() {
+        val script = """
+            SHARED cache SINGLE
+
+            TRANSFORM Main {
+                LET value = AWAIT cache.user;
+                OUTPUT { value: value }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-shared", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Subset compatibility: INCOMPATIBLE"))
+        assertTrue(result.stdout.contains("AI subset blockers:"))
+        assertTrue(result.stdout.contains("SHARED"))
+        assertTrue(result.stdout.contains("AWAIT"))
+    }
+
+    @Test
     fun inspectContractsJsonHidesObligationInferenceMetadataWithoutDebug() {
         val script = """
             TRANSFORM Main {
