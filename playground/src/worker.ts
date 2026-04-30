@@ -34,6 +34,7 @@ type WorkerResponse = {
 };
 
 import kotlinStdlibUrl from '../../interpreter/build/dist/js/productionLibrary/kotlin-kotlin-stdlib.js?url';
+import immutableCollectionsUrl from '../../interpreter/build/dist/js/productionLibrary/Kotlin-Immutable-Collections-kotlinx-collections-immutable.js?url';
 import atomicfuUrl from '../../interpreter/build/dist/js/productionLibrary/kotlinx-atomicfu.js?url';
 import coroutinesCoreUrl from '../../interpreter/build/dist/js/productionLibrary/kotlinx-coroutines-core.js?url';
 import serializationCoreUrl from '../../interpreter/build/dist/js/productionLibrary/kotlinx-serialization-kotlinx-serialization-core.js?url';
@@ -89,6 +90,7 @@ function loadFacade(): Promise<PlaygroundFacade> {
 
       if (!globalScope[INTERPRETER_GLOBAL]) {
         await loadScript(kotlinStdlibUrl);
+        await loadScript(immutableCollectionsUrl);
         await loadScript(atomicfuUrl);
         await loadScript(coroutinesCoreUrl);
         await loadScript(serializationCoreUrl);

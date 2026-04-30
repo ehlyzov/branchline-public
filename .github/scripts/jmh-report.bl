@@ -53,14 +53,15 @@ FUNC resolveSuite(benchmark) = CASE {
 };
 
 FUNC toUs(value, unit) {
-    LET num = NUMBER(value);
-    IF num == NULL THEN {
+    LET raw = NUMBER(value);
+    IF raw == NULL THEN {
         RETURN NULL;
     }
+    LET num = DEC(raw);
     RETURN CASE {
-        WHEN unit == "ns/op" THEN num / 1000
-        WHEN unit == "ms/op" THEN num * 1000
-        WHEN unit == "s/op" THEN num * 1000000
+        WHEN unit == "ns/op" THEN num / DEC(1000)
+        WHEN unit == "ms/op" THEN num * DEC(1000)
+        WHEN unit == "s/op" THEN num * DEC(1000000)
         WHEN CONTAINS(unit, "s/op") THEN num
         ELSE NULL
     };
@@ -81,7 +82,11 @@ FUNC resolveAllocBytes(entry) {
     IF metric == NULL THEN {
         RETURN NULL;
     }
-    RETURN NUMBER(metric.score);
+    LET raw = NUMBER(metric.score);
+    IF raw == NULL THEN {
+        RETURN NULL;
+    }
+    RETURN DEC(raw);
 }
 
 FUNC buildParamsText(params) {
@@ -196,7 +201,7 @@ FUNC buildComparison(rows) {
                 dataset: dataset,
                 interpreter: interp,
                 vm: vm,
-                ratio: vm / interp
+                ratio: DEC(vm) / DEC(interp)
             });
         }
     }

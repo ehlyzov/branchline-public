@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "prebuild": "npm run test:worker-deps",
+    "build": "vite build",
+    "test:worker-deps": "node scripts/check-worker-deps.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -1,15 +1,16 @@
 SHARED jmh MANY;
 
 FUNC toNs(value, unit) {
-    LET num = NUMBER(value);
-    IF num == NULL THEN {
+    LET raw = NUMBER(value);
+    IF raw == NULL THEN {
         RETURN NULL;
     }
+    LET num = DEC(raw);
     RETURN CASE {
         WHEN unit == "ns/op" THEN num
-        WHEN unit == "ms/op" THEN num * 1000000
-        WHEN unit == "s/op" THEN num * 1000000000
-        WHEN CONTAINS(unit, "s/op") THEN num * 1000
+        WHEN unit == "ms/op" THEN num * DEC(1000000)
+        WHEN unit == "s/op" THEN num * DEC(1000000000)
+        WHEN CONTAINS(unit, "s/op") THEN num * DEC(1000)
         ELSE NULL
     };
 }
@@ -19,10 +20,10 @@ FUNC formatNs(value) {
         RETURN "n/a";
     }
     IF value >= 1000000 THEN {
-        RETURN STRING(value / 1000000) + " ms/op";
+        RETURN STRING(DEC(value) / DEC(1000000)) + " ms/op";
     }
     IF value >= 1000 THEN {
-        RETURN STRING(value / 1000) + " us/op";
+        RETURN STRING(DEC(value) / DEC(1000)) + " us/op";
     }
     RETURN STRING(value) + " ns/op";
 }
@@ -66,7 +67,11 @@ FUNC resolveAllocBytes(entry) {
     IF metric == NULL THEN {
         RETURN NULL;
     }
-    RETURN NUMBER(metric.score);
+    LET raw = NUMBER(metric.score);
+    IF raw == NULL THEN {
+        RETURN NULL;
+    }
+    RETURN DEC(raw);
 }
 
 FUNC loadResults() {

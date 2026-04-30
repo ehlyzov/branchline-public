@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: '../docs/assets',
-    emptyOutDir: false,
+    emptyOutDir: true,
     assetsDir: '.',
     cssCodeSplit: false,
     rollupOptions: {

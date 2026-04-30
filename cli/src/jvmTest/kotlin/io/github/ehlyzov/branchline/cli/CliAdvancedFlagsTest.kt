@@ -282,6 +282,71 @@ public class CliAdvancedFlagsTest {
     }
 
     @Test
+    public fun jmhSummaryUsesDecimalArithmeticForRatios() {
+        val scriptPath = resolveJmhSummaryScript()
+        val interpreterResults = writeTempFile(
+            "branchline-jmh-interpreter",
+            ".json",
+            """
+                [
+                  {
+                    "benchmark": "io.github.ehlyzov.branchline.benchmarks.InterpreterTransformBenchmark.typicalTransform",
+                    "params": { "dataset": "small" },
+                    "primaryMetric": {
+                      "score": 1.2,
+                      "scoreUnit": "us/op",
+                      "scorePercentiles": { "0.95": 1.4 }
+                    },
+                    "secondaryMetrics": {
+                      "gc.alloc.rate.norm": { "score": 10.0 }
+                    }
+                  }
+                ]
+            """.trimIndent(),
+        )
+        val vmResults = writeTempFile(
+            "branchline-jmh-vm",
+            ".json",
+            """
+                [
+                  {
+                    "benchmark": "io.github.ehlyzov.branchline.vm.VMTransformBenchmark.typicalTransform",
+                    "params": { "dataset": "small" },
+                    "primaryMetric": {
+                      "score": 1.2345678901234567,
+                      "scoreUnit": "us/op",
+                      "scorePercentiles": { "0.95": 1.5 }
+                    },
+                    "secondaryMetrics": {
+                      "gc.alloc.rate.norm": { "score": 11.0 }
+                    }
+                  }
+                ]
+            """.trimIndent(),
+        )
+
+        val result = runCli(
+            args = listOf(
+                scriptPath.toString(),
+                "--shared-file",
+                "jmh=${interpreterResults}",
+                "--shared-file",
+                "jmh=${vmResults}",
+                "--shared-format",
+                "json",
+                "--shared-key",
+                "relative",
+                "--output-format",
+                "json-compact",
+            ),
+        )
+
+        assertSuccess(result)
+        val output = parseJsonInput(result.stdout)
+        assertEquals(2L, output["rows"])
+    }
+
+    @Test
     public fun xml_input_conversion_warnings_are_printed_to_stderr() {
         val script = """
             TRANSFORM Main {
@@ -353,16 +418,24 @@ private fun writeTempFile(dir: Path, name: String, contents: String): Path {
 }
 
 private fun resolveJunitSummaryScript(): Path {
+    return resolveGithubScript("junit-summary.bl")
+}
+
+private fun resolveJmhSummaryScript(): Path {
+    return resolveGithubScript("jmh-report.bl")
+}
+
+private fun resolveGithubScript(name: String): Path {
     var current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize()
     var attempts = 0
     while (attempts < 8) {
-        val candidate = current.resolve(".github").resolve("scripts").resolve("junit-summary.bl")
+        val candidate = current.resolve(".github").resolve("scripts").resolve(name)
         if (Files.exists(candidate)) return candidate
         val parent = current.parent ?: break
         current = parent
         attempts += 1
     }
-    error("Unable to locate .github/scripts/junit-summary.bl from ${System.getProperty("user.dir")}")
+    error("Unable to locate .github/scripts/$name from ${System.getProperty("user.dir")}")
 }
 
 private fun assertNumberEquals(expected: Double, actual: Any?) {

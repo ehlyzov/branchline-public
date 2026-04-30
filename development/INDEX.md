@@ -7,6 +7,8 @@ superseded_by: []
 last_updated: 2026-04-30
 changelog:
   - date: 2026-04-30
+    change: "Tracked and implemented playground Kotlin/JS dependency loading, docs/assets cleanup, and decimal-domain JMH summary fixes."
+  - date: 2026-04-30
     change: "Started Normalization MVP slice under AI-Friendly DSL M3: AstRenderer + BranchlineFacade normalizedSource population + bl inspect --normalized flag."
   - date: 2026-04-30
     change: "Completed Service Knowledge Contour Bootstrap with startup docs, canonical service map, verification contract, generated overlays, and contour lifecycle scripts."
@@ -136,6 +138,7 @@ This index is the canonical entry point for the /development knowledge base. All
 
 ### Implemented
 - [Service Knowledge Contour Bootstrap](docs/service-knowledge-contour-bootstrap.md) -- minimal repository contour and lifecycle scripts.
+- [Playground And CI Regression Fixes](docs/playground-ci-regression-fixes.md) -- Kotlin/JS dependency loading, docs/assets cleanup, and decimal JMH summary arithmetic.
 - [Contract Type Precision Upgrade](language/contract-type-precision-upgrade.md) -- latest-only contract stack hard-cut plus nullable precision, closure/domain fixes, and SemVer contract-diff gates.
 - [CLI Rollout](tooling/cli-rollout.md) -- JVM/JS CLI shipped.
 - [Playground Examples Modernization](docs/playground-examples-modernization.md) -- aggressive modern-style rewrite of all playground examples with validation coverage.
