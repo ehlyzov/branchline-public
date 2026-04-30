@@ -127,11 +127,23 @@ private fun fnCONTAINS(args: List<Any?>): Any {
     return s.contains(sub)
 }
 
+private const val REGEX_CACHE_LIMIT = 64
+private val regexCache: MutableMap<String, Regex> = HashMap()
+
+private fun cachedRegex(pat: String): Regex {
+    val cached = regexCache[pat]
+    if (cached != null) return cached
+    if (regexCache.size >= REGEX_CACHE_LIMIT) regexCache.clear()
+    val compiled = pat.toRegex()
+    regexCache[pat] = compiled
+    return compiled
+}
+
 private fun fnMATCH(args: List<Any?>): Any {
     require(args.size == 2) { "MATCH(str, pattern)" }
     val s = args[0] as? String ?: error("MATCH: first arg must be string")
     val pat = args[1]?.toString() ?: ""
-    val regex = pat.toRegex()
+    val regex = cachedRegex(pat)
     return regex.findAll(s).map { it.value }.toList()
 }
 
@@ -140,7 +152,7 @@ private fun fnREPLACE(args: List<Any?>): Any {
     val s = args[0] as? String ?: error("REPLACE: first arg must be string")
     val pat = args[1]?.toString() ?: ""
     val repl = args[2]?.toString() ?: ""
-    return s.replace(pat.toRegex(), repl)
+    return s.replace(cachedRegex(pat), repl)
 }
 
 

@@ -65,6 +65,7 @@ import io.github.ehlyzov.branchline.std.blockingAwait
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.collections.LinkedHashMap
+import kotlinx.collections.immutable.toPersistentList
 
 /**
  * Executes an IR program and collects OUTPUT objects. Design goals:
@@ -277,68 +278,37 @@ class Exec(
         val hadBinding = bindingScope != null
         val prev = if (hadBinding) bindingScope.getLocal(e.varName) else null
         val target = bindingScope ?: env
-        val out = when (iterVal) {
-            is List<*> -> {
-                val size = iterVal.size
-                val listOut = if (e.where == null) ArrayList<Any?>(size) else ArrayList()
-                if (e.where == null) {
-                    for (i in 0 until size) {
-                        target.setLocal(e.varName, iterVal[i])
-                        listOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (i in 0 until size) {
-                        target.setLocal(e.varName, iterVal[i])
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        listOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                listOut
+
+        val iter: Iterable<Any?> = asIterableForLoop(iterVal)
+            ?: error("Array comprehension expects list/iterable/sequence")
+        val initialCapacity = if (e.where == null && iterVal is Collection<*>) iterVal.size else 0
+        val out = ArrayList<Any?>(initialCapacity)
+
+        if (e.where == null) {
+            for (item in iter) {
+                target.setLocal(e.varName, item)
+                out.add(evalExpr(e.mapExpr, env))
             }
-            is Iterable<*> -> {
-                val iterOut = if (e.where == null && iterVal is Collection<*>) {
-                    ArrayList<Any?>(iterVal.size)
-                } else {
-                    ArrayList()
-                }
-                if (e.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                iterOut
+        } else {
+            for (item in iter) {
+                target.setLocal(e.varName, item)
+                if (!evalExpr(e.where, env).asBool()) continue
+                out.add(evalExpr(e.mapExpr, env))
             }
-            is Sequence<*> -> {
-                val iterOut = ArrayList<Any?>()
-                if (e.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(e.varName, item)
-                        if (!evalExpr(e.where, env).asBool()) continue
-                        iterOut.add(evalExpr(e.mapExpr, env))
-                    }
-                }
-                iterOut
-            }
-            else -> error("Array comprehension expects list/iterable/sequence")
         }
+
         if (hadBinding) {
             target.setLocal(e.varName, prev)
         } else {
             env.removeLocal(e.varName)
         }
         return out
+    }
+
+    private fun asIterableForLoop(value: Any?): Iterable<Any?>? = when (value) {
+        is Iterable<*> -> value
+        is Sequence<*> -> value.asIterable()
+        else -> null
     }
 
     private fun handleUnary(e: UnaryExpr, env: Env): Any? = when (e.token.type) {
@@ -716,11 +686,15 @@ class Exec(
 
     private fun stringify(v: Any?): Any? = when (v) {
         null -> null
-        is Map<*, *> -> LinkedHashMap<String, Any?>().apply {
+        is Map<*, *> -> LinkedHashMap<String, Any?>(v.size).apply {
             for ((k, vv) in v) put(k.toString(), stringify(vv))
         }
 
-        is List<*> -> v.map { stringify(it) }
+        is List<*> -> {
+            val out = ArrayList<Any?>(v.size)
+            for (item in v) out.add(stringify(item))
+            out
+        }
         else -> v
     }
 
@@ -781,18 +755,25 @@ class Exec(
             this[key] = newChild
         }
 
-    private fun List<*>.withReplaced(idx: Int, newChild: Any?): ArrayList<Any?> {
+    /**
+     * Persistent-list-aware list update. If `this` is already a PersistentList,
+     * uses its O(log32 N) `set`. Otherwise pays a one-time toPersistentList()
+     * conversion (the same O(N) the old ArrayList copy used to do) so that
+     * subsequent withReplaced/withAppended calls on the result are O(log N).
+     */
+    private fun List<*>.withReplaced(idx: Int, newChild: Any?): List<Any?> {
         require(idx in 0 until this.size) { "Index $idx out of bounds 0..${this.size - 1}" }
-        return ArrayList<Any?>(this.size).apply {
-            addAll(this@withReplaced)
-            this[idx] = newChild
-        }
+        return this.toPersistentList().set(idx, newChild)
     }
 
-    private fun List<*>.withAppended(value: Any?): ArrayList<Any?> =
-        ArrayList<Any?>(this.size + 1).apply {
-            addAll(this@withAppended)
-            add(value)
+    /**
+     * Persistent-list-aware list append. Same lazy-conversion pattern as
+     * withReplaced. Notably benefits APPEND-in-loop programs where the same
+     * list is repeatedly grown — each subsequent append is O(log32 N) instead
+     * of O(N) full clone.
+     */
+    private fun List<*>.withAppended(value: Any?): List<Any?> {
+        return this.toPersistentList().add(value)
     }
 
     // --- Properties → Map
@@ -1055,10 +1036,7 @@ class Exec(
             is List<*> -> cur
             else -> error("APPEND TO expects list in variable '${n.name}'")
         }
-        val appended = ArrayList<Any?>(base.size + 1).apply {
-            addAll(base)
-            add(evalExpr(n.value, env))
-        }
+        val appended = base.toPersistentList().add(evalExpr(n.value, env))
         env.setExisting(n.name, appended)
         emitPathWrite("APPEND", n.name, listOf(n.name), cur, appended)
     }
@@ -1152,126 +1130,21 @@ class Exec(
         val useFastPath = canFastPathForEachBody(n.body)
 
         val iterVal = evalExpr(n.iterable, env)
-        when (iterVal) {
-            is List<*> -> {
-                val size = iterVal.size
-                if (n.where == null) {
-                    for (i in 0 until size) {
-                        target.setLocal(n.varName, iterVal[i])
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (i in 0 until size) {
-                        target.setLocal(n.varName, iterVal[i])
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
+        val iter: Iterable<Any?> = asIterableForLoop(iterVal)
+            ?: error("FOR EACH expects list/iterable/sequence")
+
+        for (item in iter) {
+            target.setLocal(n.varName, item)
+            if (n.where != null && !evalExpr(n.where, env).asBool()) continue
+            if (useFastPath) {
+                execObjectNoReturn(n.body, env, out)
+            } else {
+                val res = execObject(n.body, env, out)
+                if (res.returned) {
+                    if (hadBinding) target.setLocal(n.varName, prev) else env.removeLocal(n.varName)
+                    return res
                 }
             }
-            is Iterable<*> -> {
-                if (n.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            is Sequence<*> -> {
-                if (n.where == null) {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (useFastPath) {
-                            execObjectNoReturn(n.body, env, out)
-                        } else {
-                            val res = execObject(n.body, env, out)
-                            if (res.returned) {
-                                if (hadBinding) {
-                                    target.setLocal(n.varName, prev)
-                                } else {
-                                    env.removeLocal(n.varName)
-                                }
-                                return res
-                            }
-                        }
-                    }
-                } else {
-                    for (item in iterVal) {
-                        target.setLocal(n.varName, item)
-                        if (evalExpr(n.where, env).asBool()) {
-                            if (useFastPath) {
-                                execObjectNoReturn(n.body, env, out)
-                            } else {
-                                val res = execObject(n.body, env, out)
-                                if (res.returned) {
-                                    if (hadBinding) {
-                                        target.setLocal(n.varName, prev)
-                                    } else {
-                                        env.removeLocal(n.varName)
-                                    }
-                                    return res
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else -> error("FOR EACH expects list/iterable/sequence")
         }
 
         if (hadBinding) target.setLocal(n.varName, prev) else env.removeLocal(n.varName)
@@ -1379,45 +1252,33 @@ class Exec(
     }
 }
 
-private const val NUMERIC_SITE_VARIANT_LIMIT = 4
+private val NUMERIC_KIND_COUNT = NumericKind.values().size
 
 private class NumericBinarySite(
     private val op: TokenType,
 ) {
-    private val variants: MutableList<NumericVariant> = ArrayList(NUMERIC_SITE_VARIANT_LIMIT)
-    private var megamorphic: Boolean = false
+    // Fixed-size dispatch table indexed by leftKind.ordinal * N + rightKind.ordinal.
+    // O(1) lookup replaces the previous polymorphic-inline-cache linear scan.
+    private val cache: Array<NumericVariant?> = arrayOfNulls(NUMERIC_KIND_COUNT * NUMERIC_KIND_COUNT)
 
     fun eval(left: Any?, right: Any?): Any {
         val leftKind = numericKindOf(left) ?: error("$op expects numeric operands")
         val rightKind = numericKindOf(right) ?: error("$op expects numeric operands")
-        if (!megamorphic) {
-            for (variant in variants) {
-                if (variant.matches(leftKind, rightKind)) {
-                    return variant.eval(left, right)
-                }
-            }
-            val variant = createNumericVariant(op, leftKind, rightKind)
-            if (variant != null) {
-                if (variants.size < NUMERIC_SITE_VARIANT_LIMIT) {
-                    variants.add(variant)
-                    return variant.eval(left, right)
-                }
-                megamorphic = true
-                return evalGenericNumeric(op, left, right)
-            }
+        val idx = leftKind.ordinal * NUMERIC_KIND_COUNT + rightKind.ordinal
+        val cached = cache[idx]
+        if (cached != null) return cached.eval(left, right)
+        val variant = createNumericVariant(op, leftKind, rightKind)
+        if (variant != null) {
+            cache[idx] = variant
+            return variant.eval(left, right)
         }
         return evalGenericNumeric(op, left, right)
     }
 }
 
-private data class NumericVariant(
-    private val leftKind: NumericKind,
-    private val rightKind: NumericKind,
+private class NumericVariant(
     val eval: (Any?, Any?) -> Any,
-) {
-    fun matches(left: NumericKind, right: NumericKind): Boolean =
-        left == leftKind && right == rightKind
-}
+)
 
 private fun createNumericVariant(
     op: TokenType,
@@ -1438,35 +1299,35 @@ private fun createNumericVariant(
 private fun createAddVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 addIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) + (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) + (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) + bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) + bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) + (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) + (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) + toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) + toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) + (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) + bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) + (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) + (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) + (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) + (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() + (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() + (r as BLBigDec) }
         else -> null
     }
 }
@@ -1474,35 +1335,35 @@ private fun createAddVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createSubVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 subIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) - (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) - (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) - bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) - bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) - (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) - (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) - toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) - toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) - (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) - bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) - (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) - (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) - (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) - (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() - (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() - (r as BLBigDec) }
         else -> null
     }
 }
@@ -1510,35 +1371,35 @@ private fun createSubVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createMulVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 mulIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.F && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.I && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) * (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) * (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) * bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) * bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) * (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) * (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.F && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> toDoubleValue(l) * toDoubleValue(r) }
+            NumericVariant { l, r -> toDoubleValue(l) * toDoubleValue(r) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) * (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) * bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) * (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) * (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) * (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) * (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() * (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() * (r as BLBigDec) }
         else -> null
     }
 }
@@ -1546,17 +1407,17 @@ private fun createMulVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createDivVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) / (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) / bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) / (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) / (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) / (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) / (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() / (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() / (r as BLBigDec) }
         leftKind != NumericKind.BD && rightKind != NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 val divisor = toDoubleValue(r)
                 require(divisor != 0.0) { "Division by zero" }
                 toDoubleValue(l) / divisor
@@ -1568,15 +1429,15 @@ private fun createDivVariant(leftKind: NumericKind, rightKind: NumericKind): Num
 private fun createIDivVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 idivIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) / (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) / (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) / bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) / bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) / (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) / (r as BLBigInt) }
         else -> null
     }
 }
@@ -1584,29 +1445,29 @@ private fun createIDivVariant(leftKind: NumericKind, rightKind: NumericKind): Nu
 private fun createRemVariant(leftKind: NumericKind, rightKind: NumericKind): NumericVariant? {
     return when {
         leftKind == NumericKind.BD && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigDec) % (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % bigDecOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigDec) % bigDecOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigDecOfLongCached(toLongValue(l)) % (r as BLBigDec) }
+            NumericVariant { l, r -> bigDecOfLongCached(toLongValue(l)) % (r as BLBigDec) }
         leftKind == NumericKind.BD && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigDec) % (r as BLBigInt).toBLBigDec() }
+            NumericVariant { l, r -> (l as BLBigDec) % (r as BLBigInt).toBLBigDec() }
         leftKind == NumericKind.BI && rightKind == NumericKind.BD ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt).toBLBigDec() % (r as BLBigDec) }
+            NumericVariant { l, r -> (l as BLBigInt).toBLBigDec() % (r as BLBigDec) }
         leftKind == NumericKind.BI && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) % (r as BLBigInt) }
+            NumericVariant { l, r -> (l as BLBigInt) % (r as BLBigInt) }
         leftKind == NumericKind.BI && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r -> (l as BLBigInt) % bigIntOfLongCached(toLongValue(r)) }
+            NumericVariant { l, r -> (l as BLBigInt) % bigIntOfLongCached(toLongValue(r)) }
         leftKind == NumericKind.I && rightKind == NumericKind.BI ->
-            NumericVariant(leftKind, rightKind) { l, r -> bigIntOfLongCached(toLongValue(l)) % (r as BLBigInt) }
+            NumericVariant { l, r -> bigIntOfLongCached(toLongValue(l)) % (r as BLBigInt) }
         leftKind == NumericKind.F || rightKind == NumericKind.F ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 val divisor = toDoubleValue(r)
                 require(divisor != 0.0) { "Division by zero" }
                 toDoubleValue(l) % divisor
             }
         leftKind == NumericKind.I && rightKind == NumericKind.I ->
-            NumericVariant(leftKind, rightKind) { l, r ->
+            NumericVariant { l, r ->
                 remIntegersFast(toLongValue(l), toLongValue(r), preferInt(l, r))
             }
         else -> null

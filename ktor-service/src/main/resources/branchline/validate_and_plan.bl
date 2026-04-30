@@ -1,0 +1,63 @@
+TRANSFORM ValidateAndPlan(
+    input: {
+        transactionId: string,
+        warehouseId: string,
+        skuId: string,
+        price: string,
+        effectiveTime: string,
+        source: string,
+        needAck: boolean,
+    }
+) -> {
+    accepted: boolean,
+    outcome: string,
+    reason?: string,
+    errors: [string],
+    transactionId: string,
+    warehouseId: string,
+    skuId: string,
+    price: string,
+    effectiveTime: string,
+    source: string,
+    needAck: boolean,
+} {
+    LET errors = [];
+    LET tx = STRING(input.transactionId);
+    LET src = STRING(input.source);
+    LET priceValue = NUMBER(input.price);
+    LET parts = SPLIT(STRING(input.price), ".");
+    LET fraction = IF LENGTH(parts) > 1 THEN parts.1 ELSE "";
+    LET scaleTooLarge = LENGTH(fraction) > 2;
+
+    IF LENGTH(TRIM(tx)) == 0 THEN {
+        SET errors = APPEND(errors, "transactionId must be non-blank");
+    } ELSE {}
+
+    IF LENGTH(TRIM(src)) == 0 THEN {
+        SET errors = APPEND(errors, "source must be non-blank");
+    } ELSE {}
+
+    IF priceValue < 0 THEN {
+        SET errors = APPEND(errors, "price must be non-negative");
+    } ELSE {}
+
+    IF scaleTooLarge THEN {
+        SET errors = APPEND(errors, "price scale must be <= 2");
+    } ELSE {}
+
+    LET accepted = LENGTH(errors) == 0;
+
+    OUTPUT {
+        accepted: accepted,
+        outcome: IF accepted THEN "MUTATION" ELSE "REJECTED",
+        reason: IF accepted THEN NULL ELSE "VALIDATION_FAILED",
+        errors: errors,
+        transactionId: tx,
+        warehouseId: STRING(input.warehouseId),
+        skuId: STRING(input.skuId),
+        price: STRING(input.price),
+        effectiveTime: STRING(input.effectiveTime),
+        source: src,
+        needAck: input.needAck,
+    };
+}

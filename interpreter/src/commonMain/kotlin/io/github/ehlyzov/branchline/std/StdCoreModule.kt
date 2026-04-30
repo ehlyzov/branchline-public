@@ -2,6 +2,7 @@ package io.github.ehlyzov.branchline.std
 
 import kotlin.collections.ArrayDeque
 import io.github.ehlyzov.branchline.runtime.bignum.BLBigInt
+import kotlinx.collections.immutable.toPersistentList
 
 class StdCoreModule : StdModule {
     override fun register(r: StdRegistry) {
@@ -28,13 +29,18 @@ private fun keysSharedAccess(args: List<Any?>): Boolean =
 private fun fnKEYS(args: List<Any?>): Any {
     require(args.size == 1) { "KEYS(coll)" }
     return when (val coll = args[0]) {
-        is List<*> -> coll.indices.toList()
-        is Map<*, *> -> coll.keys.toList()
+        is List<*> -> {
+            val size = coll.size
+            val out = ArrayList<Int>(size)
+            for (i in 0 until size) out.add(i)
+            out
+        }
+        is Map<*, *> -> ArrayList<Any?>(coll.size).apply { addAll(coll.keys) }
         is SharedResourceHandle -> {
             val store = SharedStoreProvider.store ?: error("SharedStore is not configured")
             val snapshot = store.snapshot()[coll.name]
                 ?: error("Unknown shared resource: ${coll.name}")
-            snapshot.keys.toList()
+            ArrayList<Any?>(snapshot.size).apply { addAll(snapshot.keys) }
         }
         else -> error("KEYS: arg must be list or object")
     }
@@ -43,13 +49,20 @@ private fun fnKEYS(args: List<Any?>): Any {
 private fun fnVALUES(args: List<Any?>): Any {
     require(args.size == 1) { "VALUES(obj)" }
     val m = args[0] as? Map<*, *> ?: error("VALUES: arg must be object")
-    return m.values.toList()
+    return ArrayList<Any?>(m.size).apply { addAll(m.values) }
 }
 
 private fun fnENTRIES(args: List<Any?>): Any {
     require(args.size == 1) { "ENTRIES(obj)" }
     val m = args[0] as? Map<*, *> ?: error("ENTRIES: arg must be object")
-    return m.entries.map { e -> mapOf("key" to e.key!!, "value" to e.value) }
+    val out = ArrayList<Map<String, Any?>>(m.size)
+    for ((k, v) in m) {
+        val entry = LinkedHashMap<String, Any?>(2)
+        entry["key"] = k!!
+        entry["value"] = v
+        out.add(entry)
+    }
+    return out
 }
 
 private fun fnPUT(args: List<Any?>): Any {
@@ -61,18 +74,11 @@ private fun fnPUT(args: List<Any?>): Any {
         is Map<*, *> -> clonePut(coll, asObjectKey(key), value)
         is List<*> -> {
             val i = asIndex(key)
+            val src = coll.toPersistentList()
             when {
-                i < coll.size -> ArrayList<Any?>(coll.size).apply {
-                    addAll(coll)
-                    this[i] = value
-                }
-
-                i == coll.size -> ArrayList<Any?>(coll.size + 1).apply {
-                    addAll(coll)
-                    add(value)
-                }
-
-                else -> error("PUT: index $i out of bounds 0..${coll.size}")
+                i < src.size -> src.set(i, value)
+                i == src.size -> src.add(value)
+                else -> error("PUT: index $i out of bounds 0..${src.size}")
             }
         }
 
@@ -89,10 +95,7 @@ private fun fnDELETE(args: List<Any?>): Any {
         is List<*> -> {
             val i = asIndex(key)
             require(i in 0 until coll.size) { "DELETE: index $i out of bounds 0..${coll.size - 1}" }
-            ArrayList<Any?>(coll.size - 1).apply {
-                addAll(coll.subList(0, i))
-                addAll(coll.subList(i + 1, coll.size))
-            }
+            coll.toPersistentList().removeAt(i)
         }
 
         else -> error("DELETE: unsupported collection")
@@ -173,19 +176,13 @@ private fun fnWALK(args: List<Any?>): Any {
 private fun fnAPPEND(args: List<Any?>): Any {
     require(args.size == 2) { "APPEND(list, value)" }
     val src = args[0] as? List<*> ?: error("APPEND: first arg must be list")
-    return ArrayList<Any?>(src.size + 1).apply {
-        addAll(src)
-        add(args[1])
-    }
+    return src.toPersistentList().add(args[1])
 }
 
 private fun fnPREPEND(args: List<Any?>): Any {
     require(args.size == 2) { "PREPEND(list, value)" }
     val src = args[0] as? List<*> ?: error("PREPEND: first arg must be list")
-    return ArrayList<Any?>(src.size + 1).apply {
-        add(args[1])
-        addAll(src)
-    }
+    return src.toPersistentList().add(0, args[1])
 }
 
 private fun fnCOLLECT(args: List<Any?>): Any {

@@ -5,17 +5,34 @@ public class Env(
     private val parent: Env? = null,
 ) {
     public fun get(name: String): Any? {
-        val value = locals[name]
-        return if (value != null || locals.containsKey(name)) value else parent?.get(name)
+        var current: Env? = this
+        while (current != null) {
+            val v = current.locals.getOrElse(name) { MISSING }
+            if (v !== MISSING) return v
+            current = current.parent
+        }
+        return null
     }
 
     public fun getLocal(name: String): Any? = locals[name]
 
-    public fun contains(name: String): Boolean =
-        locals.containsKey(name) || parent?.contains(name) == true
+    public fun contains(name: String): Boolean {
+        var current: Env? = this
+        while (current != null) {
+            if (current.locals.containsKey(name)) return true
+            current = current.parent
+        }
+        return false
+    }
 
-    public fun resolveScope(name: String): Env? =
-        if (locals.containsKey(name)) this else parent?.resolveScope(name)
+    public fun resolveScope(name: String): Env? {
+        var current: Env? = this
+        while (current != null) {
+            if (current.locals.containsKey(name)) return current
+            current = current.parent
+        }
+        return null
+    }
 
     public fun setLocal(name: String, value: Any?) {
         locals[name] = value
@@ -35,5 +52,9 @@ public class Env(
 
     public fun removeLocal(name: String) {
         locals.remove(name)
+    }
+
+    private companion object {
+        private val MISSING: Any = Any()
     }
 }

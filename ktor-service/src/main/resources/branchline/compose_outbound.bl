@@ -1,0 +1,61 @@
+TRANSFORM ComposeOutbound(
+    input: {
+        transactionId: string,
+        needAck: boolean,
+        accepted: boolean,
+        reason?: string,
+        errors: [string],
+        mutationStatus: string,
+        warehouseId: string,
+        skuId: string,
+        productId: string,
+        price: string,
+        effectiveTime: string,
+        storedAt: string,
+        eventId: string,
+        source: string,
+    }
+) -> {
+    ack?: {
+        transactionId: string,
+        status: string,
+        reason?: string,
+        errors: [string],
+    },
+    event?: {
+        transactionId: string,
+        warehouseId: string,
+        skuId: string,
+        productId: string,
+        price: string,
+        effectiveTime: string,
+        storedAt: string,
+        eventId: string,
+        source: string,
+    },
+} {
+    LET ackPayload = IF input.needAck THEN {
+        transactionId: input.transactionId,
+        status: IF input.accepted THEN "ACCEPTED" ELSE "REJECTED",
+        reason: IF input.accepted THEN NULL ELSE input.reason,
+        errors: input.errors,
+    } ELSE NULL;
+
+    LET emitEvent = input.accepted && (input.mutationStatus == "CREATED" || input.mutationStatus == "UPDATED");
+    LET eventPayload = IF emitEvent THEN {
+        transactionId: input.transactionId,
+        warehouseId: input.warehouseId,
+        skuId: input.skuId,
+        productId: input.productId,
+        price: input.price,
+        effectiveTime: input.effectiveTime,
+        storedAt: input.storedAt,
+        eventId: input.eventId,
+        source: input.source,
+    } ELSE NULL;
+
+    OUTPUT {
+        ack: ackPayload,
+        event: eventPayload,
+    };
+}

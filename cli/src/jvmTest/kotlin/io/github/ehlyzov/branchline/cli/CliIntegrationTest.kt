@@ -120,7 +120,7 @@ public class CliIntegrationTest {
     }
 
     @Test
-    fun inspectContractsJsonDefaultsToV3() {
+    fun inspectContractsJsonUsesLatestCanonicalShape() {
         val script = """
             TRANSFORM Main {
                 OUTPUT { greeting: "hi " + input.name }
@@ -139,11 +139,13 @@ public class CliIntegrationTest {
 
         assertEquals(ExitCode.SUCCESS.code, result.exitCode)
         val payload = Json.parseToJsonElement(result.stdout).jsonObject
-        assertEquals("v3", payload["version"]?.jsonPrimitive?.content)
+        assertTrue(!payload.containsKey("version"))
+        assertTrue(payload.containsKey("input"))
+        assertTrue(payload.containsKey("output"))
     }
 
     @Test
-    fun inspectContractsJsonSupportsVersionOverrideToV2() {
+    fun inspectContractsJsonRejectsUnknownLegacyOption() {
         val script = """
             TRANSFORM Main {
                 OUTPUT { greeting: "hi " + input.name }
@@ -157,14 +159,12 @@ public class CliIntegrationTest {
                 "inspect",
                 scriptPath.toString(),
                 "--contracts-json",
-                "--contracts-version",
-                "v2",
+                "--contracts-legacy",
             ),
         )
 
-        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
-        val payload = Json.parseToJsonElement(result.stdout).jsonObject
-        assertEquals("v2", payload["version"]?.jsonPrimitive?.content)
+        assertEquals(ExitCode.USAGE.code, result.exitCode)
+        assertTrue(result.stderr.contains("Unknown option '--contracts-legacy'"))
     }
 
     @Test
@@ -183,7 +183,7 @@ public class CliIntegrationTest {
                 scriptPath.toString(),
                 "--contracts-json",
                 "--contracts-json-version",
-                "v2",
+                "legacy",
             ),
         )
 
@@ -257,6 +257,60 @@ public class CliIntegrationTest {
         assertEquals("OUTPUT", debugOutputRoot["origin"]?.jsonPrimitive?.content)
         assertTrue(!standardOutputRoot.containsKey("evidence"))
         assertTrue(!debugOutputRoot.containsKey("evidence"))
+    }
+
+    @Test
+    fun inspectTextShowsSubsetCompatibilityAndFeatureUsage() {
+        val script = """
+            TRANSFORM Main {
+                LET greeting = "hi " + input.name;
+                OUTPUT { greeting: greeting }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-text", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Subset compatibility: COMPATIBLE"))
+        assertTrue(result.stdout.contains("Feature usage:"))
+        assertTrue(result.stdout.contains("let"))
+        assertTrue(result.stdout.contains("output"))
+    }
+
+    @Test
+    fun inspectTextShowsBlockingAiSubsetDiagnostics() {
+        val script = """
+            SHARED cache SINGLE
+
+            TRANSFORM Main {
+                LET value = AWAIT cache.user;
+                OUTPUT { value: value }
+            }
+        """.trimIndent()
+        val scriptPath = Files.createTempFile("branchline-inspect-shared", ".bl")
+        Files.writeString(scriptPath, script, StandardCharsets.UTF_8)
+
+        val result = runCli(
+            args = listOf(
+                "inspect",
+                scriptPath.toString(),
+                "--contracts",
+            ),
+        )
+
+        assertEquals(ExitCode.SUCCESS.code, result.exitCode)
+        assertTrue(result.stdout.contains("Subset compatibility: INCOMPATIBLE"))
+        assertTrue(result.stdout.contains("AI subset blockers:"))
+        assertTrue(result.stdout.contains("SHARED"))
+        assertTrue(result.stdout.contains("AWAIT"))
     }
 
     @Test

@@ -54,7 +54,14 @@ private fun fnFIND(args: List<Any?>): Any? {
     require(args.size == 2) { "FIND(list, fn)" }
     val src = asList("FIND", args, 0)
     val f = asFn("FIND", args, 1)
-    for (i in src.indices) if (truthy(f(listOf(src[i], i, src)))) return src[i]
+    val callList = arrayListOf<Any?>(null, null, null)
+    for (i in src.indices) {
+        val v = src[i]
+        callList[0] = v
+        callList[1] = i
+        callList[2] = src
+        if (truthy(f(callList))) return v
+    }
     return null
 }
 
@@ -62,7 +69,13 @@ private fun fnSOME(args: List<Any?>): Any {
     require(args.size == 2) { "SOME(list, fn)" }
     val src = asList("SOME", args, 0)
     val f = asFn("SOME", args, 1)
-    for (i in src.indices) if (truthy(f(listOf(src[i], i, src)))) return true
+    val callList = arrayListOf<Any?>(null, null, null)
+    for (i in src.indices) {
+        callList[0] = src[i]
+        callList[1] = i
+        callList[2] = src
+        if (truthy(f(callList))) return true
+    }
     return false
 }
 
@@ -70,7 +83,13 @@ private fun fnEVERY(args: List<Any?>): Any {
     require(args.size == 2) { "EVERY(list, fn)" }
     val src = asList("EVERY", args, 0)
     val f = asFn("EVERY", args, 1)
-    for (i in src.indices) if (!truthy(f(listOf(src[i], i, src)))) return false
+    val callList = arrayListOf<Any?>(null, null, null)
+    for (i in src.indices) {
+        callList[0] = src[i]
+        callList[1] = i
+        callList[2] = src
+        if (!truthy(f(callList))) return false
+    }
     return true
 }
 
@@ -79,7 +98,14 @@ private fun fnREDUCE(args: List<Any?>): Any? {
     val src = asList("REDUCE", args, 0)
     var acc = args[1]
     val f = asFn("REDUCE", args, 2)
-    for (i in src.indices) acc = f(listOf(acc, src[i], i, src))
+    val callList = arrayListOf<Any?>(null, null, null, null)
+    for (i in src.indices) {
+        callList[0] = acc
+        callList[1] = src[i]
+        callList[2] = i
+        callList[3] = src
+        acc = f(callList)
+    }
     return acc
 }
 
