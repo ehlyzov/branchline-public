@@ -1,6 +1,12 @@
 package io.github.ehlyzov.branchline.ir
 
+import io.github.ehlyzov.branchline.BranchlineDiagnostic
 import io.github.ehlyzov.branchline.Token
+
+public class BranchlineRuntimeDiagnosticException(
+    public val diagnostic: BranchlineDiagnostic,
+    message: String,
+) : IllegalStateException(message)
 
 public class RuntimeErrorWithContext(
     public val token: Token,

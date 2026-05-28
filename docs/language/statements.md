@@ -100,11 +100,20 @@ SHARED session MANY;
 ## Where {#where}
 `WHERE` filters loop iterations and comprehensions.
 
-## Set/Append/Init {#set}
-`SET`, `APPEND`, `TO`, and `INIT` are assignment operations used in loops and shared writes.
+## Set And Plus Assign {#set}
+`SET` replaces an existing variable or path value. `+=` updates an explicit local accumulator: it appends one item when the current value is a list, adds numeric values when both sides are numeric, and follows `+` string concatenation when either side is text.
 
-## Init {#init}
-`INIT` provides an initial value when appending to a missing target.
+`+=` does not create missing variables or intermediate containers. Initialize accumulators with `LET` before updating them.
+
+| Intent | Preferred statement style |
+| --- | --- |
+| Replace a local variable | `SET name = value` |
+| Replace an existing path | `SET object.path = value` |
+| Append to an accumulator list | `items += item` |
+| Append to a nested accumulator list | `state.items += item` |
+| Build a new list expression | `LET next = APPEND(items, item)` |
+
+`SET x = APPEND(x, value)` is tolerated when written manually, but it is not the preferred accumulator style. Use `x += value` for explicit accumulation and keep `APPEND(list, value)` for expression contexts.
 
 ## Related
 - [Expressions](expressions.md)

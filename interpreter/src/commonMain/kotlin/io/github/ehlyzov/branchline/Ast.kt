@@ -174,17 +174,15 @@ data class SetVarStmt(
     override val token: Token,
 ) : Stmt
 
-data class AppendToStmt(
+data class PlusAssignStmt(
     val target: AccessExpr,
     val value: Expr,
-    val init: Expr?,
     override val token: Token
 ) : Stmt
 
-data class AppendToVarStmt(
+data class PlusAssignVarStmt(
     val name: String,
     val value: Expr,
-    val init: Expr?,
     override val token: Token
 ) : Stmt
 

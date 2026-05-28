@@ -8,12 +8,12 @@ import kotlin.test.assertEquals
 class EdgesTest {
 
     @EngineTest
-    fun appendTo_with_grouped_value(engine: ExecutionEngine) {
+    fun plus_assign_with_grouped_value(engine: ExecutionEngine) {
         val out = compileAndRun(
             """
             LET acc = { errs: [] };
             LET k = "X";
-            APPEND TO acc.errs ("missing: " + k) INIT [];
+            acc.errs += ("missing: " + k);
             OUTPUT acc;
             """.trimIndent(),
             engine = engine,
@@ -22,11 +22,11 @@ class EdgesTest {
     }
 
     @EngineTest
-    fun appendTo_on_indexed_lvalue_and_grouped_value(engine: ExecutionEngine) {
+    fun plus_assign_on_indexed_lvalue_and_grouped_value(engine: ExecutionEngine) {
         val out = compileAndRun(
             """
             LET o = { a: { b: [] } };
-            APPEND TO o.a.b (1 + 2) INIT [];
+            o.a.b += (1 + 2);
             OUTPUT o;
             """.trimIndent(),
             engine = engine,

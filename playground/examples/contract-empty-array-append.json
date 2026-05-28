@@ -1,14 +1,14 @@
 {
   "title": "Contracts: append from empty array",
-  "description": "Demonstrates stable output typing with FOR EACH filtering and APPEND into an array seeded with [].",
+  "description": "Demonstrates stable output typing with FOR EACH filtering and += into an array seeded with [].",
   "showContracts": true,
   "program": [
     "LET normalized = []",
     "FOR EACH suite IN input.suites WHERE suite != NULL {",
-    "    SET normalized = APPEND(normalized, {",
+    "    normalized += {",
     "        name: suite[\"name\"] ?? \"unknown\",",
     "        tests: NUMBER(suite[\"tests\"] ?? 0)",
-    "    })",
+    "    }",
     "}",
     "OUTPUT {",
     "    suites: normalized",

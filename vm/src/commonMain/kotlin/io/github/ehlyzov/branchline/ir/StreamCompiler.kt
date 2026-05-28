@@ -14,7 +14,7 @@ private fun dumpIR(nodes: List<IRNode>, indent: String = "") {
     for (n in nodes) {
         when (n) {
             is IRLet -> println("${indent}LET ${n.name} = …")
-            is IRAppendTo -> println("${indent}APPEND TO ${n.target} INIT=${n.init != null}")
+            is IRPlusAssign -> println("${indent}${n.target} += …")
             is IRSet -> println("${indent}SET ${n.target} = …")
             is IRModify -> println("${indent}MODIFY ${n.target} …")
             is IRExprOutput -> println("${indent}OUTPUT<expr>")
@@ -41,7 +41,7 @@ private fun dumpIR(nodes: List<IRNode>, indent: String = "") {
             }
 
             is IRExprStmt -> println("${indent}EXPR<expr>")
-            is IRAppendVar -> println("${indent}APPEND TO ${n.name} INIT=${n.init != null}")
+            is IRPlusAssignVar -> println("${indent}${n.name} += …")
             is IRSetVar -> println("${indent}SET ${n.name} = …")
         }
     }

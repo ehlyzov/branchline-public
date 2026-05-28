@@ -43,7 +43,7 @@ class SnapshotCompletenessVMTest {
                 TRANSFORM T { LET xs = [1,2,3];
                     LET acc = { ys: [] };
                     FOR EACH i IN xs {
-                        APPEND TO acc.ys i INIT [];
+                        acc.ys += i;
                         SUSPEND 0;
                     }
                     OUTPUT acc

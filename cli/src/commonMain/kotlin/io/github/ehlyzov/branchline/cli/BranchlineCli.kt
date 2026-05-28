@@ -33,6 +33,7 @@ import io.github.ehlyzov.branchline.debug.CollectingTracer
 import io.github.ehlyzov.branchline.debug.TraceOptions
 import io.github.ehlyzov.branchline.debug.TraceReport
 import io.github.ehlyzov.branchline.ir.RuntimeErrorWithContext
+import io.github.ehlyzov.branchline.ir.BranchlineRuntimeDiagnosticException
 import io.github.ehlyzov.branchline.json.JsonInputException
 import io.github.ehlyzov.branchline.json.JsonKeyMode
 import io.github.ehlyzov.branchline.json.JsonNumberMode
@@ -44,9 +45,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 
 public enum class PlatformKind { JVM, JS }
 
@@ -196,7 +194,12 @@ public object BranchlineCli {
             )
         } catch (ex: Exception) {
             handleCliError(
-                CliError(formatRuntimeException(ex), CliErrorKind.RUNTIME, parseResult.command),
+                CliError(
+                    message = formatRuntimeException(ex),
+                    kind = CliErrorKind.RUNTIME,
+                    command = parseResult.command,
+                    diagnostic = runtimeDiagnosticFromException(ex),
+                ),
                 errorFormat,
             )
         }
@@ -480,6 +483,10 @@ public object BranchlineCli {
                 includeNormalizedSource = options.includeNormalizedSource,
             )
         )
+        if (!result.success && options.contractsFormat == ContractFormat.JSON) {
+            println(result.inspectJson())
+            return inspectExitCode(result.diagnostics.firstOrNull())
+        }
         if (!result.success) {
             val diagnostic = result.diagnostics.firstOrNull()
             throw CliException(
@@ -488,7 +495,7 @@ public object BranchlineCli {
             )
         }
         val report = if (options.contractsFormat == ContractFormat.JSON) {
-            renderInspectJsonWithNormalized(result, options.includeNormalizedSource)
+            result.inspectJson()
         } else {
             renderInspectText(result, options.includeNormalizedSource)
         }
@@ -1751,20 +1758,6 @@ private fun renderInspectText(
     return sections.joinToString("\n\n").trim()
 }
 
-private fun renderInspectJsonWithNormalized(
-    result: BranchlineInspectResult,
-    includeNormalizedSource: Boolean,
-): String {
-    val baseJson = result.contractsJson()
-    if (!includeNormalizedSource || result.normalizedSource == null) return baseJson
-    val element = Json.parseToJsonElement(baseJson).jsonObject
-    val merged = buildJsonObject {
-        element.forEach { (key, value) -> put(key, value) }
-        put("normalizedSource", JsonPrimitive(result.normalizedSource!!))
-    }
-    return Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), merged)
-}
-
 private fun renderInspectSummary(result: BranchlineInspectResult): String {
     val lines = mutableListOf<String>()
     lines += "Subset compatibility: ${result.subsetCompatibility}"
@@ -1827,6 +1820,14 @@ private fun inspectErrorKind(diagnostic: BranchlineDiagnostic?): CliErrorKind = 
     "parse_error", "semantic_error" -> CliErrorKind.RUNTIME
     else -> CliErrorKind.RUNTIME
 }
+
+private fun inspectExitCode(diagnostic: BranchlineDiagnostic?): Int =
+    when (inspectErrorKind(diagnostic)) {
+        CliErrorKind.USAGE -> ExitCode.USAGE.code
+        CliErrorKind.INPUT -> ExitCode.INPUT.code
+        CliErrorKind.RUNTIME -> ExitCode.RUNTIME.code
+        CliErrorKind.IO -> ExitCode.IO.code
+    }
 
 private fun renderSignature(signature: TransformSignature?): String {
     if (signature == null) return "none"
@@ -1967,6 +1968,12 @@ private fun formatRuntimeException(ex: Exception): String {
     }
 }
 
+private fun runtimeDiagnosticFromException(ex: Exception): BranchlineDiagnostic? {
+    if (ex is BranchlineRuntimeDiagnosticException) return ex.diagnostic
+    val ctx = ex as? RuntimeErrorWithContext
+    return ctx?.cause?.let { it as? BranchlineRuntimeDiagnosticException }?.diagnostic
+}
+
 private fun handleCliError(error: CliError, format: ErrorFormat): Int {
     val payload = when (format) {
         ErrorFormat.TEXT -> error.message
@@ -1977,6 +1984,7 @@ private fun handleCliError(error: CliError, format: ErrorFormat): Int {
                     "kind" to error.kind.id,
                     "exitCode" to error.kind.exitCode.code,
                     "command" to error.command?.name?.lowercase(),
+                    "diagnostic" to error.diagnostic?.let(::cliDiagnosticToMap),
                 ),
                 "version" to CliVersion.CURRENT,
             ),
@@ -1985,6 +1993,36 @@ private fun handleCliError(error: CliError, format: ErrorFormat): Int {
     }
     printError(payload)
     return error.kind.exitCode.code
+}
+
+private fun cliDiagnosticToMap(diagnostic: BranchlineDiagnostic): Map<String, Any?> {
+    val span = diagnostic.span?.let {
+        mapOf(
+            "startLine" to it.startLine,
+            "startColumn" to it.startColumn,
+            "endLine" to it.endLine,
+            "endColumn" to it.endColumn,
+        )
+    }
+    val payload = diagnostic.payload?.let {
+        linkedMapOf<String, Any?>().apply {
+            it.operation?.let { value -> put("operation", value) }
+            it.targetPath?.let { value -> put("targetPath", value) }
+            it.expectedKind?.let { value -> put("expectedKind", value) }
+            it.actualKind?.let { value -> put("actualKind", value) }
+            it.expected?.let { value -> put("expected", fromJsonElement(value)) }
+            it.actual?.let { value -> put("actual", fromJsonElement(value)) }
+            it.hint?.let { value -> put("hint", value) }
+        }
+    }
+    return mapOf(
+        "code" to diagnostic.code,
+        "message" to diagnostic.message,
+        "severity" to diagnostic.severity.name,
+        "category" to diagnostic.category.id,
+        "span" to span,
+        "payload" to payload,
+    )
 }
 
 private fun renderTrace(tracer: CollectingTracer, format: TraceFormat): String {

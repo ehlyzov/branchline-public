@@ -5,10 +5,10 @@ import kotlin.collections.LinkedHashSet
 import io.github.ehlyzov.branchline.runtime.bignum.toPlainString
 import io.github.ehlyzov.branchline.Expr
 import io.github.ehlyzov.branchline.Token
-import io.github.ehlyzov.branchline.ir.IRAppendTo
 import io.github.ehlyzov.branchline.ir.IRLet
 import io.github.ehlyzov.branchline.ir.IRModify
 import io.github.ehlyzov.branchline.ir.IRNode
+import io.github.ehlyzov.branchline.ir.IRPlusAssign
 import io.github.ehlyzov.branchline.ir.IRSet
 import kotlin.time.Duration
 import kotlin.time.TimeSource
@@ -133,7 +133,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
     private fun pushCaptureFor(node: IRNode) {
         val kind = when (node) {
             is IRSet -> "SET"
-            is IRAppendTo -> "APPEND"
+            is IRPlusAssign -> "APPEND"
             is IRModify -> "MODIFY"
             else -> return
         }
@@ -365,7 +365,7 @@ class CollectingTracer(override val opts: TraceOptions = TraceOptions()) : Trace
 
     private fun popCaptureFor(node: IRNode) {
         when (node) {
-            is IRSet, is IRAppendTo, is IRModify -> if (capStack.isNotEmpty()) capStack.removeLast()
+            is IRSet, is IRPlusAssign, is IRModify -> if (capStack.isNotEmpty()) capStack.removeLast()
             else -> Unit
         }
     }

@@ -45,7 +45,7 @@ public open class InterpreterTransformBenchmark {
     private lateinit var deepNestedReadExec: Exec
     private lateinit var nestedPathSetExec: Exec
     private lateinit var deepNestedSetExec: Exec
-    private lateinit var nestedAppendToExec: Exec
+    private lateinit var nestedPlusAssignExec: Exec
     private lateinit var stdlibCascadeAppendExec: Exec
 
     @Setup(Level.Trial)
@@ -63,7 +63,7 @@ public open class InterpreterTransformBenchmark {
         deepNestedReadExec = buildExec(DEEP_NESTED_READ)
         nestedPathSetExec = buildExec(NESTED_PATH_SET)
         deepNestedSetExec = buildExec(DEEP_NESTED_SET)
-        nestedAppendToExec = buildExec(NESTED_APPEND_TO)
+        nestedPlusAssignExec = buildExec(NESTED_PLUS_ASSIGN)
         stdlibCascadeAppendExec = buildExec(STDLIB_CASCADE_APPEND)
     }
 
@@ -119,13 +119,13 @@ public open class InterpreterTransformBenchmark {
     }
 
     /**
-     * T1.3 probe: APPEND TO into a nested-path list inside a FOR EACH. Each
+     * T1.3 probe: += into a nested-path list inside a FOR EACH. Each
      * iteration re-clones the basket map AND the basket.items list. Classical
      * O(n^2) shape if path-update copy dominates.
      */
     @Benchmark
-    public fun nestedAppendTo(bh: Blackhole) {
-        bh.consume(nestedAppendToExec.run(env))
+    public fun nestedPlusAssign(bh: Blackhole) {
+        bh.consume(nestedPlusAssignExec.run(env))
     }
 
     /**
@@ -220,11 +220,11 @@ private val DEEP_NESTED_SET = """
     }
 """.trimIndent()
 
-private val NESTED_APPEND_TO = """
+private val NESTED_PLUS_ASSIGN = """
     TRANSFORM T {
         LET basket = { items: [] };
         FOR EACH order IN input.orders {
-            APPEND TO basket.items order.id;
+            basket.items += order.id;
         }
         OUTPUT {
             count: LENGTH(basket.items),

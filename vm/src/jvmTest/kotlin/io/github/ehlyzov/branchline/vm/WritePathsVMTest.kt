@@ -72,11 +72,11 @@ class WritePathsVMTest {
     }
 
     @Test
-    fun append_nested_with_init() {
+    fun plus_assign_nested_existing_list() {
         val out = compileAndRun(
             """
-            LET o = { a: { b: null } };
-            APPEND TO o.a.b 1 INIT [0];
+            LET o = { a: { b: [0] } };
+            o.a.b += 1;
             OUTPUT o;
             """.trimIndent(),
             engine = ExecutionEngine.VM
@@ -85,11 +85,11 @@ class WritePathsVMTest {
     }
 
     @Test
-    fun append_nested_existing_list() {
+    fun plus_assign_nested_existing_list_again() {
         val out = compileAndRun(
             """
             LET o = { a: { b: [10] } };
-            APPEND TO o.a.b 11 INIT [0,0];
+            o.a.b += 11;
             OUTPUT o;
             """.trimIndent(),
             engine = ExecutionEngine.VM

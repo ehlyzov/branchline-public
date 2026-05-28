@@ -52,6 +52,7 @@ object InstructionTable {
         arrayOf(OperandType.OBJ_KEY), // SET_STATIC
         emptyArray(), // SET_DYNAMIC
         emptyArray(), // APPEND
+        emptyArray(), // PLUS_ASSIGN
         emptyArray(), // CONCAT
         arrayOf(OperandType.INT), // JUMP
         arrayOf(OperandType.INT), // JUMP_IF_TRUE
@@ -199,6 +200,9 @@ sealed class Instruction {
 
     /** Append value to array/list */
     object APPEND : Instruction()
+
+    /** Apply Branchline '+=' to list, numeric, or string values */
+    object PLUS_ASSIGN : Instruction()
 
     /** Concatenate two arrays */
     object CONCAT : Instruction()
@@ -373,6 +377,7 @@ data class Bytecode(
             Opcode.SET_STATIC -> Instruction.SET_STATIC(getObjKeyOperand(pc))
             Opcode.SET_DYNAMIC -> Instruction.SET_DYNAMIC
             Opcode.APPEND -> Instruction.APPEND
+            Opcode.PLUS_ASSIGN -> Instruction.PLUS_ASSIGN
             Opcode.CONCAT -> Instruction.CONCAT
             Opcode.JUMP -> Instruction.JUMP(getIntOperand(pc))
             Opcode.JUMP_IF_TRUE -> Instruction.JUMP_IF_TRUE(getIntOperand(pc))
@@ -508,6 +513,7 @@ data class Bytecode(
                     is Instruction.SET_STATIC -> Opcode.SET_STATIC.ordinal
                     Instruction.SET_DYNAMIC -> Opcode.SET_DYNAMIC.ordinal
                     Instruction.APPEND -> Opcode.APPEND.ordinal
+                    Instruction.PLUS_ASSIGN -> Opcode.PLUS_ASSIGN.ordinal
                     Instruction.CONCAT -> Opcode.CONCAT.ordinal
                     is Instruction.JUMP -> Opcode.JUMP.ordinal
                     is Instruction.JUMP_IF_TRUE -> Opcode.JUMP_IF_TRUE.ordinal

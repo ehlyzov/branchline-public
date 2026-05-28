@@ -192,13 +192,13 @@ class ExplainProvenanceOneLoopTest {
         )
 
         val program = """
-            LET result = { total: 0 };
+            LET result = { total: 0, items: [] };
             FOR o IN row.orders {
-              APPEND TO result.items {
+              result.items += {
                 id: o.id,
                 final: ROUND(FX(APPLY_COUPON(o.price * o.qty, o.coupon, row.coupons), o.currency, "EUR", row.fx)
                              * (1 + TAX_RATE(o.region, row.tax)), 2)
-              } INIT [];
+              };
               
               SET result.total = (result.total ?? 0)
                 + ROUND(FX(APPLY_COUPON(o.price * o.qty, o.coupon, row.coupons), o.currency, "EUR", row.fx)
@@ -325,14 +325,14 @@ class ExplainProvenanceOneLoopTest {
         )
 
         val program = """
-            LET result = { total: 0 };
+            LET result = { total: 0, items: [] };
             FOR o IN row.orders {
               LET effectivePrice = ROUND(FX(APPLY_COUPON(o.price * o.qty, o.coupon, row.coupons), o.currency, "EUR", row.fx)
                              * (1 + TAX_RATE(o.region, row.tax)), 2);
-              APPEND TO result.items {
+              result.items += {
                 id: o.id,
                 final: effectivePrice
-              } INIT [];
+              };
               
               SET result.total = (result.total ?? 0) + effectivePrice;
             }

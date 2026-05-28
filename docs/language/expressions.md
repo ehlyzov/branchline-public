@@ -81,14 +81,14 @@ primary ::= literal | pathExpr | IDENTIFIER | funCall | arrayLit
 ## Arrays and objects
 ```
 arrayLit  ::= "[" ( expression ("," expression)* )? "]"
-            | "[" FOR "(" IDENTIFIER IN expression ")" ( IF expression )? "=>" expression "]"
+            | "[" expression FOR EACH IDENTIFIER IN expression ( WHERE expression )? "]"
 objectLit ::= "{" fieldPair ("," fieldPair)* "}"
 ```
 
 ### Array comprehensions
 ```branchline
-LET squares = [FOR (n IN input.numbers) => n * n];
-LET evens = [FOR (n IN input.numbers) IF n % 2 == 0 => n];
+LET squares = [n * n FOR EACH n IN input.numbers]
+LET evens = [n FOR EACH n IN input.numbers WHERE n % 2 == 0]
 ```
 
 ## Try/Catch {#try}

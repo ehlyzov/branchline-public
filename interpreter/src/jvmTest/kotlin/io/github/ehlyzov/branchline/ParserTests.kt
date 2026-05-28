@@ -408,13 +408,23 @@ class ParserTest {
 
     @Test
     fun `append to with init parsed`() {
+        assertThrows<ParseException> {
+            parse("""
+                TRANSFORM { APPEND TO obj.items item INIT []
+                }
+            """.trimIndent())
+        }
+    }
+
+    @Test
+    fun `plus assign path statement parsed`() {
         val prg = parse("""
-            TRANSFORM { APPEND TO obj.items item INIT []
+            TRANSFORM { obj.items += item
             }
         """.trimIndent())
-        val stmt = (prg.decls[0] as TransformDecl).body.statements[0] as AppendToStmt
+        val stmt = (prg.decls[0] as TransformDecl).body.statements[0] as PlusAssignStmt
         assertEquals("obj", (stmt.target.base as IdentifierExpr).name)
-        assertNotNull(stmt.init)
+        assertTrue(stmt.value is IdentifierExpr)
     }
 
     @Test

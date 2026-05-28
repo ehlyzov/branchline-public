@@ -15,7 +15,7 @@ class ToIR(
     private fun compileStmt(s: Stmt): List<IRNode> = when (s) {
         is LetStmt -> listOf(IRLet(s.name, s.expr))
         is SetStmt -> listOf(IRSet(s.target, s.value))
-        is AppendToStmt -> listOf(IRAppendTo(s.target, s.value, s.init))
+        is PlusAssignStmt -> listOf(IRPlusAssign(s.target, s.value))
         is OutputStmt -> {
             when (val tpl = s.template) {
                 is ObjectExpr -> listOf(IROutput(tpl.fields))
@@ -54,7 +54,7 @@ class ToIR(
         is ReturnStmt -> listOf(IRReturn(s.value))
         is ExprStmt -> listOf(IRExprStmt(s.expr))
         is SetVarStmt -> listOf(IRSetVar(s.name, s.value))
-        is AppendToVarStmt -> listOf(IRAppendVar(s.name, s.value, s.init))
+        is PlusAssignVarStmt -> listOf(IRPlusAssignVar(s.name, s.value))
         is SharedWriteStmt -> listOf(IRExprStmt(buildSharedWriteCall(s)))
         else -> error("Stmt kind ${s::class.simpleName} unsupported in transform body")
     }

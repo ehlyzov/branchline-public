@@ -20,6 +20,7 @@ This page outlines the tokens recognized by the Branchline lexer. Tokens are gro
 | QUESTION | `?` | `value?` |
 | COALESCE | `??` | `a ?? b` |
 | PLUS | `+` | `a + b` |
+| PLUS_ASSIGN | `+=` | `items += item` |
 | MINUS | `-` | `a - b` |
 | STAR | `*` | `a * b` |
 | SLASH | `/` | `a / b` |
@@ -86,8 +87,8 @@ with the `//` integer division operator.
 | `RETURN` | Return from function. | [example](statements.md#return) |
 | `MODIFY` | Modify an existing value. | [example](statements.md#modify) |
 | `WHERE` | Filter clause. | [example](statements.md#where) |
-| `SET` / `APPEND` / `TO` | Assignment operations. | [example](statements.md#set) |
-| `INIT` | Initial value for a variable. | [example](statements.md#init) |
+| `SET` | Replace an existing variable or path value. | [example](statements.md#set) |
+| `APPEND` | Pure list-append function name in expressions. | [example](expressions.md) |
 
 ### Expression Keywords
 

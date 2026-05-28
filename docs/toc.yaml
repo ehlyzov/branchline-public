@@ -13,6 +13,12 @@ items:
         href: language/statements.md
       - name: Expressions
         href: language/expressions.md
+      - name: Numeric Semantics
+        href: language/numeric.md
+      - name: I/O Contracts
+        href: language/io-contracts.md
+      - name: AI Canonical Subset
+        href: language/ai-canonical-subset.md
       - name: Grammar
         href: language/grammar.md
       - name: Standard Library
@@ -31,6 +37,19 @@ items:
             href: language/std-strings.md
           - name: Time
             href: language/std-time.md
+  - name: Learn
+    href: learn/index.md
+    items:
+      - name: Hello Transform
+        href: learn/hello-transform.md
+      - name: Paths and Reshaping
+        href: learn/paths-and-reshaping.md
+      - name: Control Flow
+        href: learn/control-flow.md
+      - name: Error Handling and Tracing
+        href: learn/error-handling.md
+      - name: Recipes
+        href: learn/recipes.md
   - name: Guides
     href: guides/index.md
     items:
@@ -62,7 +81,13 @@ items:
         href: vm.md
       - name: Benchmarks
         href: benchmarks.md
+        items:
+          - name: Release Benchmark History
+            href: benchmarks/releases/index.md
       - name: JSONata Benchmarks
         href: benchmarks/jsonata.md
+        items:
+          - name: JSONata Release Benchmark History
+            href: benchmarks/jsonata/releases/index.md
   - name: Playground
     href: playground.md

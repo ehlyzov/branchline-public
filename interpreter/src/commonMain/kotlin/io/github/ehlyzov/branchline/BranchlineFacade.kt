@@ -17,7 +17,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -29,28 +31,6 @@ public data class BranchlineInspectRequest(
     val includeDebugMetadata: Boolean = false,
     val includeWitness: Boolean = false,
     val includeNormalizedSource: Boolean = false,
-)
-
-@Serializable
-public enum class BranchlineDiagnosticSeverity {
-    ERROR,
-    WARNING,
-}
-
-@Serializable
-public data class BranchlineSourceSpan(
-    val startLine: Int,
-    val startColumn: Int,
-    val endLine: Int,
-    val endColumn: Int,
-)
-
-@Serializable
-public data class BranchlineDiagnostic(
-    val code: String,
-    val message: String,
-    val severity: BranchlineDiagnosticSeverity,
-    val span: BranchlineSourceSpan? = null,
 )
 
 @Serializable
@@ -99,6 +79,54 @@ public data class BranchlineInspectResult(
         val json = if (pretty) BRANCHLINE_FACADE_JSON_PRETTY else BRANCHLINE_FACADE_JSON_COMPACT
         return json.encodeToString(JsonElement.serializer(), payload)
     }
+
+    public fun inspectJson(pretty: Boolean = true): String {
+        val payload = inspectJsonPayload()
+        val json = if (pretty) BRANCHLINE_FACADE_JSON_PRETTY else BRANCHLINE_FACADE_JSON_COMPACT
+        return json.encodeToString(JsonElement.serializer(), payload)
+    }
+
+    public fun inspectJsonPayload(): JsonObject = buildJsonObject {
+        put("success", success)
+        put(
+            "diagnostics",
+            buildJsonArray {
+                diagnostics.forEach { add(diagnosticPayload(it)) }
+            },
+        )
+        put(
+            "warnings",
+            buildJsonArray {
+                warnings.forEach { add(diagnosticPayload(it)) }
+            },
+        )
+        put(
+            "featureUsage",
+            buildJsonObject {
+                put(
+                    "features",
+                    buildJsonArray {
+                        featureUsage.features.forEach { add(JsonPrimitive(it)) }
+                    },
+                )
+            },
+        )
+        put("subsetCompatibility", subsetCompatibility.name)
+        put("normalizedSource", normalizedSource?.let(::JsonPrimitive) ?: JsonNull)
+        put(
+            "transforms",
+            buildJsonArray {
+                transforms.forEach { add(inspectTransformPayload(it)) }
+            },
+        )
+
+        // Compatibility fields for existing single-transform --contracts-json consumers.
+        if (transforms.size == 1) {
+            contractJsonEntry(transforms.first()).forEach { (key, value) ->
+                put(key, value)
+            }
+        }
+    }
 }
 
 public object BranchlineFacade {
@@ -116,6 +144,10 @@ public object BranchlineFacade {
                         code = "no_transform_blocks",
                         message = "Program must declare at least one TRANSFORM block.",
                         severity = BranchlineDiagnosticSeverity.ERROR,
+                        category = BranchlineDiagnosticCategory.SEMANTIC,
+                        payload = BranchlineDiagnosticPayload(
+                            hint = "Add a TRANSFORM block before inspecting contracts.",
+                        ),
                     ),
                 )
             }
@@ -125,6 +157,13 @@ public object BranchlineFacade {
                         code = "transform_not_found",
                         message = "Transform '${request.transformName}' not found",
                         severity = BranchlineDiagnosticSeverity.ERROR,
+                        category = BranchlineDiagnosticCategory.SEMANTIC,
+                        payload = BranchlineDiagnosticPayload(
+                            operation = "select-transform",
+                            targetPath = request.transformName,
+                            expectedKind = "declared-transform",
+                            hint = "Use one of the transform names declared in the program.",
+                        ),
                     ),
                 )
             val typeDecls = program.decls.filterIsInstance<TypeDecl>()
@@ -156,6 +195,12 @@ public object BranchlineFacade {
                         code = "normalization_unsupported_node",
                         message = "Cannot canonicalize node '${ex.nodeKind}': ${ex.detail}",
                         severity = BranchlineDiagnosticSeverity.WARNING,
+                        category = BranchlineDiagnosticCategory.NORMALIZATION,
+                        payload = BranchlineDiagnosticPayload(
+                            operation = "normalize",
+                            actualKind = ex.nodeKind,
+                            hint = "Keep the original source or remove unsupported canonical-subset constructs.",
+                        ),
                     )
                     null
                 }
@@ -253,6 +298,53 @@ private fun witnessPayload(
 
 private fun contractJsonEntry(transform: BranchlineInspectTransform): JsonObject = transform.mergedContract
 
+private fun inspectTransformPayload(transform: BranchlineInspectTransform): JsonObject = buildJsonObject {
+    put("name", transform.name)
+    put("contractSource", transform.contractSource)
+    put("explicitContract", transform.explicitContract ?: JsonNull)
+    put("inferredContract", transform.inferredContract)
+    put("mergedContract", transform.mergedContract)
+    put("witness", transform.witness ?: JsonNull)
+}
+
+private fun diagnosticPayload(diagnostic: BranchlineDiagnostic): JsonObject = buildJsonObject {
+    put("code", diagnostic.code)
+    put("message", diagnostic.message)
+    put("severity", diagnostic.severity.name)
+    put("category", diagnostic.category.id)
+    val span = diagnostic.span
+    if (span == null) {
+        put("span", JsonNull)
+    } else {
+        put(
+            "span",
+            buildJsonObject {
+                put("startLine", span.startLine)
+                put("startColumn", span.startColumn)
+                put("endLine", span.endLine)
+                put("endColumn", span.endColumn)
+            },
+        )
+    }
+    val payload = diagnostic.payload
+    if (payload == null) {
+        put("payload", JsonNull)
+    } else {
+        put(
+            "payload",
+            buildJsonObject {
+                payload.operation?.let { put("operation", it) }
+                payload.targetPath?.let { put("targetPath", it) }
+                payload.expectedKind?.let { put("expectedKind", it) }
+                payload.actualKind?.let { put("actualKind", it) }
+                payload.expected?.let { put("expected", it) }
+                payload.actual?.let { put("actual", it) }
+                payload.hint?.let { put("hint", it) }
+            },
+        )
+    }
+}
+
 private fun selectTransforms(
     transforms: List<TransformDecl>,
     name: String?,
@@ -267,6 +359,12 @@ private fun parseDiagnostic(ex: ParseException): BranchlineDiagnostic = Branchli
     message = ex.message ?: "Parse error",
     severity = BranchlineDiagnosticSeverity.ERROR,
     span = tokenSpan(ex.token),
+    category = BranchlineDiagnosticCategory.SYNTAX,
+    payload = BranchlineDiagnosticPayload(
+        operation = "parse",
+        actualKind = ex.token.type.name,
+        hint = "Fix the syntax near the reported span, then rerun inspect.",
+    ),
 )
 
 private fun semanticDiagnostic(ex: SemanticException): BranchlineDiagnostic = BranchlineDiagnostic(
@@ -274,6 +372,12 @@ private fun semanticDiagnostic(ex: SemanticException): BranchlineDiagnostic = Br
     message = ex.message ?: "Semantic error",
     severity = BranchlineDiagnosticSeverity.ERROR,
     span = tokenSpan(ex.token),
+    category = BranchlineDiagnosticCategory.SEMANTIC,
+    payload = BranchlineDiagnosticPayload(
+        operation = "analyze",
+        actualKind = ex.token.type.name,
+        hint = "Fix the semantic issue at the reported span, then rerun inspect.",
+    ),
 )
 
 private fun warningDiagnostic(warning: SemanticWarning): BranchlineDiagnostic = BranchlineDiagnostic(
@@ -281,6 +385,11 @@ private fun warningDiagnostic(warning: SemanticWarning): BranchlineDiagnostic = 
     message = warning.message,
     severity = BranchlineDiagnosticSeverity.WARNING,
     span = tokenSpan(warning.token),
+    category = BranchlineDiagnosticCategory.SEMANTIC,
+    payload = BranchlineDiagnosticPayload(
+        operation = "analyze",
+        hint = "Review the warning and prefer canonical syntax when possible.",
+    ),
 )
 
 private fun tokenSpan(token: Token): BranchlineSourceSpan {
@@ -388,14 +497,12 @@ private fun collectSubsetStmtDiagnostics(
                 collectSubsetExprDiagnostics(stmt.value, diagnostics)
             }
             is SetVarStmt -> collectSubsetExprDiagnostics(stmt.value, diagnostics)
-            is AppendToStmt -> {
+            is PlusAssignStmt -> {
                 collectSubsetExprDiagnostics(stmt.target, diagnostics)
                 collectSubsetExprDiagnostics(stmt.value, diagnostics)
-                stmt.init?.let { collectSubsetExprDiagnostics(it, diagnostics) }
             }
-            is AppendToVarStmt -> {
+            is PlusAssignVarStmt -> {
                 collectSubsetExprDiagnostics(stmt.value, diagnostics)
-                stmt.init?.let { collectSubsetExprDiagnostics(it, diagnostics) }
             }
             is ModifyStmt -> {
                 collectSubsetExprDiagnostics(stmt.target, diagnostics)
@@ -503,6 +610,13 @@ private fun unsupportedSubsetDiagnostic(
     message = "$feature is unsupported in the AI canonical subset MVP. $details",
     severity = BranchlineDiagnosticSeverity.ERROR,
     span = tokenSpan(token),
+    category = BranchlineDiagnosticCategory.UNSUPPORTED_SUBSET,
+    payload = BranchlineDiagnosticPayload(
+        operation = "ai-subset-check",
+        actualKind = feature,
+        expectedKind = "ai-canonical-subset",
+        hint = "Remove this construct or gate the program outside the AI canonical subset.",
+    ),
 )
 
 private fun collectBlockFeatures(
@@ -530,16 +644,14 @@ private fun collectStmtFeatures(
             features += "set-var"
             collectExprFeatures(stmt.value, features)
         }
-        is AppendToStmt -> {
-            features += "append"
+        is PlusAssignStmt -> {
+            features += "plus-assign"
             collectExprFeatures(stmt.target, features)
             collectExprFeatures(stmt.value, features)
-            stmt.init?.let { collectExprFeatures(it, features) }
         }
-        is AppendToVarStmt -> {
-            features += "append-var"
+        is PlusAssignVarStmt -> {
+            features += "plus-assign-var"
             collectExprFeatures(stmt.value, features)
-            stmt.init?.let { collectExprFeatures(it, features) }
         }
         is SharedWriteStmt -> {
             features += "shared-write"

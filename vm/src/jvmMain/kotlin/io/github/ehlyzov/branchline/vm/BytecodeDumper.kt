@@ -159,6 +159,7 @@ object BytecodeDumper {
         is Instruction.SET_STATIC -> "SET_STATIC ${i.key}"
         is Instruction.SET_DYNAMIC -> "SET_DYNAMIC"
         is Instruction.APPEND -> "APPEND"
+        is Instruction.PLUS_ASSIGN -> "PLUS_ASSIGN"
         is Instruction.CONCAT -> "CONCAT"
         is Instruction.JUMP -> "JUMP ${i.address}"
         is Instruction.JUMP_IF_TRUE -> "JUMP_IF_TRUE ${i.address}"

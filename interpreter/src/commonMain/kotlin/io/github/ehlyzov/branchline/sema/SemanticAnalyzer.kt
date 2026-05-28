@@ -3,8 +3,6 @@ package io.github.ehlyzov.branchline.sema
 import io.github.ehlyzov.branchline.AbortStmt
 import io.github.ehlyzov.branchline.AccessSeg
 import io.github.ehlyzov.branchline.AccessExpr
-import io.github.ehlyzov.branchline.AppendToStmt
-import io.github.ehlyzov.branchline.AppendToVarStmt
 import io.github.ehlyzov.branchline.ArrayExpr
 import io.github.ehlyzov.branchline.ArrayCompExpr
 import io.github.ehlyzov.branchline.BinaryExpr
@@ -36,6 +34,8 @@ import io.github.ehlyzov.branchline.ObjKey
 import io.github.ehlyzov.branchline.ObjectExpr
 import io.github.ehlyzov.branchline.OutputDecl
 import io.github.ehlyzov.branchline.OutputStmt
+import io.github.ehlyzov.branchline.PlusAssignStmt
+import io.github.ehlyzov.branchline.PlusAssignVarStmt
 import io.github.ehlyzov.branchline.Program
 import io.github.ehlyzov.branchline.ReturnStmt
 import io.github.ehlyzov.branchline.SetStmt
@@ -254,15 +254,17 @@ class SemanticAnalyzer(
             true
         }
 
-        is AppendToStmt -> {
+        is PlusAssignStmt -> {
             val baseIdent = stmt.target.base as? IdentifierExpr
-                ?: throw SemanticException("APPEND TO target must start with identifier", stmt.token)
+                ?: throw SemanticException("'+=' target must start with identifier", stmt.token)
             val inScope = scopes.any { baseIdent.name in it }
-            if (!inScope && !isSharedResource(baseIdent.name)) {
+            if (!inScope) {
                 throw SemanticException("Unknown variable '${baseIdent.name}'", stmt.token)
             }
+            if (stmt.target.segs.isEmpty()) {
+                throw SemanticException("'+=' path target must have at least one segment", stmt.token)
+            }
             checkExpr(stmt.value)
-            stmt.init?.let { checkExpr(it) }
             true
         }
 
@@ -308,7 +310,13 @@ class SemanticAnalyzer(
         is GraphOutput -> true
         is NodeDecl -> true
         is ExprStmt -> true
-        is AppendToVarStmt -> true
+        is PlusAssignVarStmt -> {
+            if (scopes.none { stmt.name in it }) {
+                throw SemanticException("Unknown variable '${stmt.name}'", stmt.token)
+            }
+            checkExpr(stmt.value)
+            true
+        }
         is SetVarStmt -> true
     }
 

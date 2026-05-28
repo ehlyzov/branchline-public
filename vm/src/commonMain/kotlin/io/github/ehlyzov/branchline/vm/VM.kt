@@ -378,6 +378,7 @@ class VM(
             is Instruction.SET_STATIC -> setStatic(instruction.key)
             is Instruction.SET_DYNAMIC -> setDynamic()
             is Instruction.APPEND -> appendToArray()
+            is Instruction.PLUS_ASSIGN -> plusAssign()
             is Instruction.CONCAT -> concatenateArrays()
 
             // Control Flow
@@ -521,6 +522,7 @@ class VM(
             Opcode.SET_STATIC -> setStatic(bytecode.getObjKeyOperand(pc))
             Opcode.SET_DYNAMIC -> setDynamic()
             Opcode.APPEND -> appendToArray()
+            Opcode.PLUS_ASSIGN -> plusAssign()
             Opcode.CONCAT -> concatenateArrays()
 
             // Control Flow
@@ -880,6 +882,25 @@ class VM(
         }
         if (arr is List<*>) out.add(elem)
         push(out)
+    }
+    private fun plusAssign() {
+        val value = pop()
+        val current = pop()
+        val updated = when {
+            current is List<*> -> {
+                val out = ArrayList<Any?>(current.size + 1)
+                out.addAll(current)
+                out.add(value)
+                out
+            }
+            current is String || value is String -> current.toString() + value.toString()
+            isNumeric(current) && isNumeric(value) -> addNumbers(current, value)
+            else -> throw VMException.TypeMismatch(
+                "array, number, or string",
+                "${current} += ${value}"
+            )
+        }
+        push(updated)
     }
     private fun concatenateArrays() {
         val right = pop()

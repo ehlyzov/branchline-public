@@ -78,7 +78,7 @@ Priority is ordered roughly by enabling breadth of IR coverage and test parity.
 1) Generic write paths — done
 - Implemented `compileAccessExprForSet/Append/Modify` for nested access paths.
 - Added array index updates in VM `SET_STATIC/SET_DYNAMIC` and runtime `MODIFY`.
-- Tests: `io.github.ehlyzov.branchline.vm.WritePathsVMTest` covers nested SET, dynamic keys, array index, APPEND with INIT, and MODIFY.
+- Tests: `io.github.ehlyzov.branchline.vm.WritePathsVMTest` covers nested SET, dynamic keys, array index, `+=`, and MODIFY.
 
 2) MODIFY runtime — done
 - `VM.modifyObject` implemented to produce updated map immutably.

@@ -1,0 +1,195 @@
+---
+status: refreshed
+last_updated: 2026-05-05
+source:
+  overview: development/product/branchline-dx/overview.md
+  scenarios:
+    - development/product/branchline-dx/scenarios/01-canonical-authoring-loop.md
+    - development/product/branchline-dx/scenarios/02-friendly-mutation-operations.md
+    - development/product/branchline-dx/scenarios/03-inspect-first-cli.md
+    - development/product/branchline-dx/scenarios/04-repair-oriented-diagnostics.md
+    - development/product/branchline-dx/scenarios/05-canonical-docs-and-examples.md
+    - development/product/branchline-dx/scenarios/06-example-metadata-and-retrieval.md
+    - development/product/branchline-dx/scenarios/07-playground-ai-workbench.md
+    - development/product/branchline-dx/scenarios/08-ci-quality-gates.md
+note: "Refreshed after the two-layer mutation syntax hard-cut and docsGenerate fix; every partial/done item below includes file evidence and every gap includes a target."
+inspect_json_decisions:
+  normalizedSource:
+    current_placement: "Stable inspect JSON envelope includes normalizedSource as a top-level field; it is null when not requested, incompatible, or unavailable."
+    target_decision: "Keep normalizedSource top-level in the stable machine envelope; diagnostics and warnings disambiguate why it is null."
+    migration_status: done
+requirements:
+  S01:
+    status: partial
+    trace:
+      FR1: partial
+      FR2: done
+      FR3: partial
+      FR4: done
+      FR5: missing
+      AC-1: partial
+      AC-2: done
+      AC-3: partial
+      AC-4: missing
+    evidence:
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:77 exposes BranchlineInspectResult.normalizedSource."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:148 populates normalizedSource when requested and AI subset is compatible."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/normalize/AstRenderer.kt:267 renders += statements in canonical output."
+      - "interpreter/src/commonTest/kotlin/io/github/ehlyzov/branchline/normalize/AstRendererTest.kt:166 defines 20+ golden normalization fixtures with idempotence checks."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:95 emits stable inspect JSON envelope fields."
+      - "development/ai/ai-friendly-dsl.md:55 defines DX priority order with canonical mutation style first."
+    gaps:
+      - "Target: add public AI canonical subset/style guide page and link it from docs/toc.yaml."
+      - "Target: expand the normalization corpus when new rewrite rules are accepted."
+      - "Target: add remaining inspect envelope fixtures for semantic error and normalization warning cases."
+  S02:
+    status: partial
+    trace:
+      FR1: missing
+      FR2: missing
+      FR3: partial
+      FR4: missing
+      FR5: done
+      AC-1: done
+      AC-2: missing
+      AC-3: partial
+      AC-4: done
+    evidence:
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/Parser.kt:526 parses identifier/path += statements."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/Ast.kt:177 defines PlusAssignStmt/PlusAssignVarStmt."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/ir/Exec.kt:1006 implements += runtime writes."
+      - "vm/src/commonMain/kotlin/io/github/ehlyzov/branchline/vm/Compiler.kt:246 compiles path += and variable +=."
+      - "conformance-tests/src/jvmTest/kotlin/io/github/ehlyzov/branchline/ir/PlusAssignRuntimeTest.kt:9 covers += runtime behavior and APPEND TO rejection."
+      - "conformance-tests/src/jvmTest/kotlin/io/github/ehlyzov/branchline/ir/PlusAssignRuntimeTest.kt:83 covers structured runtime diagnostics for += mutation failures."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/std/StdCoreModule.kt:176 keeps APPEND(list, value) as a pure stdlib function."
+      - "development/ai/ai-friendly-dsl.md:67 defines mutation policy for comprehensions, +=, SET, MODIFY, and pure APPEND."
+    gaps:
+      - "Target: rewrite high-impact docs/examples to present comprehensions or += as canonical mutation style."
+      - "Target: replace named playground examples still using SET x = APPEND(x, ...) with += where semantics match."
+      - "Target: decide and gate a safe self-append normalization rewrite only for simple local identifiers."
+      - "Target: expose VM mutation diagnostics parity or record VM limitation in service knowledge gaps."
+  S03:
+    status: partial
+    trace:
+      FR1: done
+      FR2: done
+      FR3: done
+      FR4: partial
+      FR5: partial
+      AC-1: done
+      AC-2: partial
+      AC-3: done
+      AC-4: missing
+    evidence:
+      - "cli/src/commonMain/kotlin/io/github/ehlyzov/branchline/cli/BranchlineCli.kt:281 documents --contracts-json and --normalized inspect flags."
+      - "cli/src/commonMain/kotlin/io/github/ehlyzov/branchline/cli/BranchlineCli.kt:469 executes inspect through BranchlineFacade.inspect."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:95 emits success, diagnostics, warnings, featureUsage, subsetCompatibility, normalizedSource, and transforms in one JSON envelope."
+      - "cli/src/commonMain/kotlin/io/github/ehlyzov/branchline/cli/BranchlineCli.kt:480 prints the envelope for failed JSON inspect requests instead of human-only errors."
+      - "cli/src/jvmTest/kotlin/io/github/ehlyzov/branchline/cli/CliIntegrationTest.kt:128 covers compatible envelope shape."
+      - "cli/src/jvmTest/kotlin/io/github/ehlyzov/branchline/cli/CliIntegrationTest.kt:384 covers incompatible subset envelope."
+      - "cli/src/jvmTest/kotlin/io/github/ehlyzov/branchline/cli/CliIntegrationTest.kt:421 covers parse error envelope."
+    gaps:
+      - "Target: add semantic error and normalization warning envelope fixtures."
+      - "Target: add external migration notes once a release boundary exists."
+  S04:
+    status: partial
+    trace:
+      FR1: done
+      FR2: partial
+      FR3: partial
+      FR4: partial
+      FR5: partial
+      AC-1: partial
+      AC-2: partial
+      AC-3: partial
+      AC-4: partial
+    evidence:
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:156 emits normalization_unsupported_node warnings."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:177 adapts parse errors."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:179 adapts semantic errors."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/BranchlineFacade.kt:500 emits unsupported_in_ai_subset diagnostics."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/diagnostics/BranchlineDiagnostics.kt:1 defines diagnostic category and payload model."
+      - "development/language/diagnostics-taxonomy.md:1 documents syntax, semantic, contract, runtime, unsupported-subset, and normalization categories."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/ir/Exec.kt:805 adapts common SET/+= mutation failures into runtime diagnostics."
+      - "cli/src/jvmTest/kotlin/io/github/ehlyzov/branchline/cli/CliIntegrationTest.kt:123 covers CLI JSON propagation for mutation runtime diagnostics."
+    gaps:
+      - "Target: expand taxonomy into top-20 authoring diagnostics with fixtures."
+      - "Target: wire real contract mismatch diagnostics into the same payload model."
+      - "Target: decide VM/runtime diagnostics parity behavior and record any limitation."
+  S05:
+    status: partial
+    trace:
+      FR1: missing
+      FR2: missing
+      FR3: missing
+      FR4: missing
+      FR5: missing
+      AC-1: partial
+      AC-2: missing
+      AC-3: missing
+      AC-4: partial
+    evidence:
+      - "docs/language/statements.md:104 documents SET and += statement behavior."
+      - "docs/language/std-core.md:16 documents pure APPEND/PREPEND list expressions."
+      - "docs/toc.yaml declares language, learn, architecture, and benchmark pages for docsBuild."
+      - "playground/examples/contract-empty-array-append.json:8 still demonstrates accumulator append with SET x = APPEND(x, ...)."
+    gaps:
+      - "Target: audit docs/grammar/examples for parser-supported syntax and fix drift."
+      - "Target: add explicit docs/language/ai-canonical-subset.md public page."
+      - "Target: add anti-pattern -> canonical-pattern mutation section covering SET x = APPEND(x, ...) to x += value."
+  S06:
+    status: missing
+    trace:
+      FR1: missing
+      FR2: missing
+      FR3: missing
+      FR4: missing
+      FR5: missing
+      AC-1: missing
+      AC-2: missing
+      AC-3: missing
+      AC-4: missing
+    evidence:
+      - "playground/examples/hello-transform.json:2 shows title/description/program/input example descriptor fields."
+      - "conformance-tests/src/jvmTest/kotlin/io/github/ehlyzov/branchline/playground/PlaygroundExamplesJvmTest.kt:56 validates example program parsing/execution but not metadata schema."
+    gaps:
+      - "Target: add id/category/tags/aiSubset plus expected output/contract/diagnostic expectation schema."
+      - "Target: add retrieval-friendly metadata validation to playground example tests."
+  S07:
+    status: missing
+    trace:
+      FR1: missing
+      FR2: missing
+      FR3: missing
+      FR4: missing
+      FR5: missing
+      AC-1: missing
+      AC-2: missing
+      AC-3: missing
+      AC-4: partial
+    evidence:
+      - "playground/src/branchline-language.ts:1 defines playground language highlighting surface."
+      - "interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/playground/PlaygroundFacade.kt:398 builds existing playground report sections."
+      - "conformance-tests/src/jvmTest/kotlin/io/github/ehlyzov/branchline/playground/PlaygroundExamplesJvmTest.kt:56 runs playground examples under tests."
+    gaps:
+      - "Target: add normalized source pane, diagnostics pane, subset blocker pane, metadata filters, and visual verification."
+  S08:
+    status: partial
+    trace:
+      FR1: missing
+      FR2: missing
+      FR3: partial
+      FR4: partial
+      FR5: done
+      AC-1: missing
+      AC-2: missing
+      AC-3: partial
+      AC-4: partial
+    evidence:
+      - "development/service/VERIFY.md:12 defines interpreter JVM verification."
+      - "development/service/VERIFY.md:18 defines CLI JVM/Node verification."
+      - "development/service/VERIFY.md:19 defines playground asset verification."
+      - "development/service/VERIFY.md:27 defines docsBuild verification."
+      - "build.gradle:152 defines playgroundBuildAssets and build.gradle:162 defines docsGenerate."
+    gaps:
+      - "Target: add DX-specific quality matrix keyed by syntax, normalizer, diagnostics, CLI JSON, examples, docs, and playground surfaces."

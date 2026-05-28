@@ -80,7 +80,7 @@ class IfRuntimeTest {
               LET acc = { ok: true, errs: [] };
               IF true THEN {
                 SET acc.ok = false;
-                APPEND TO acc.errs "e1" INIT [];
+                acc.errs += "e1";
               } ELSE { }
               OUTPUT { ok: acc.ok, errs: acc.errs };
             """.trimIndent(),

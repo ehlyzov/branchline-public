@@ -95,7 +95,6 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
             TokenType.ENUM,
             TokenType.FOREACH,
             TokenType.FUNC,
-            TokenType.INIT,
             TokenType.LET,
             TokenType.MANY,
             TokenType.MODIFY,
@@ -108,7 +107,6 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
             TokenType.SINGLE,
             TokenType.THROW,
             TokenType.TIMES,
-            TokenType.TO,
             TokenType.TRANSFORM,
             TokenType.TYPE,
             TokenType.UNION,
@@ -515,7 +513,6 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
             match(TokenType.LET) -> parseLet()
             match(TokenType.MODIFY) -> parseModify()
             match(TokenType.SET) -> parseSet()
-            match(TokenType.APPEND) -> parseAppendTo()
             match(TokenType.OUTPUT) -> parseOutputStmt()
             match(TokenType.IF) -> parseIf(previous())
             match(TokenType.FOR) -> parseForEach(previous())
@@ -526,6 +523,15 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
             else -> {
                 val start = peek()
                 val expr = parseExpression()
+                if (match(TokenType.PLUS_ASSIGN)) {
+                    val value = parseExpression()
+                    optionalSemicolon()
+                    return when (expr) {
+                        is IdentifierExpr -> PlusAssignVarStmt(expr.name, value, start)
+                        is AccessExpr -> PlusAssignStmt(expr, value, start)
+                        else -> error(start, "'+=' target must be identifier or path")
+                    }
+                }
                 optionalSemicolon()
                 ExprStmt(expr, start)
             }
@@ -644,20 +650,6 @@ class Parser(tokens: List<Token>, private val source: String? = null) {
         consume(TokenType.RIGHT_BRACE, "Expect '}' after MODIFY block")
         optionalSemicolon()
         return ModifyStmt(targetPath, updates, lbrace)
-    }
-
-    private fun parseAppendTo(): Stmt {
-        val start = previous() // 'APPEND'
-        consume(TokenType.TO, "Expect TO after APPEND")
-        val target = parsePrimaryPostfix(allowCall = false)
-        val value = parseExpression()
-        val initExpr = if (match(TokenType.INIT)) parseExpression() else null
-        optionalSemicolon()
-        return when (target) {
-            is IdentifierExpr -> AppendToVarStmt(target.name, value, initExpr, start)
-            is AccessExpr -> AppendToStmt(target, value, initExpr, start)
-            else -> error(start, "APPEND TO target must be identifier or path")
-        }
     }
 
     private fun parseSet(): Stmt {

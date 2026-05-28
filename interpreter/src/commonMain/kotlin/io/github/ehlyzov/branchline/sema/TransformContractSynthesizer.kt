@@ -3,8 +3,6 @@ package io.github.ehlyzov.branchline.sema
 import io.github.ehlyzov.branchline.AbortStmt
 import io.github.ehlyzov.branchline.AccessExpr
 import io.github.ehlyzov.branchline.AccessSeg
-import io.github.ehlyzov.branchline.AppendToStmt
-import io.github.ehlyzov.branchline.AppendToVarStmt
 import io.github.ehlyzov.branchline.ArrayCompExpr
 import io.github.ehlyzov.branchline.ArrayExpr
 import io.github.ehlyzov.branchline.BinaryExpr
@@ -31,6 +29,8 @@ import io.github.ehlyzov.branchline.NumberLiteral
 import io.github.ehlyzov.branchline.ObjectExpr
 import io.github.ehlyzov.branchline.ObjKey
 import io.github.ehlyzov.branchline.OutputStmt
+import io.github.ehlyzov.branchline.PlusAssignStmt
+import io.github.ehlyzov.branchline.PlusAssignVarStmt
 import io.github.ehlyzov.branchline.ReturnStmt
 import io.github.ehlyzov.branchline.SetStmt
 import io.github.ehlyzov.branchline.SetVarStmt
@@ -116,17 +116,12 @@ public class TransformContractSynthesizer(
                 declareLocal(stmt.name)
             }
 
-            is AppendToVarStmt -> {
+            is PlusAssignVarStmt -> {
                 val value = evalExpr(stmt.value)
-                stmt.init?.let { evalExpr(it) }
                 val previous = env[stmt.name]
-                val elementShape = if (previous?.emptyArraySeed == true) {
-                    value.shape
-                } else {
-                    mergeValueShape(previous?.arrayElement() ?: ValueShape.Unknown, value.shape)
-                }
+                val nextShape = plusAssignShape(previous, value)
                 env[stmt.name] = AbstractValue(
-                    shape = ValueShape.ArrayShape(elementShape),
+                    shape = nextShape,
                     provenance = emptySet(),
                     evidence = value.evidence,
                     emptyArraySeed = false,
@@ -140,11 +135,10 @@ public class TransformContractSynthesizer(
                 applySetToLocalTarget(stmt.target, value)
             }
 
-            is AppendToStmt -> {
+            is PlusAssignStmt -> {
                 evalAccessTarget(stmt.target)
                 val value = evalExpr(stmt.value)
-                stmt.init?.let { evalExpr(it) }
-                applyAppendToLocalTarget(stmt.target, value)
+                applyPlusAssignToLocalTarget(stmt.target, value)
             }
 
             is ModifyStmt -> {
@@ -1493,19 +1487,28 @@ public class TransformContractSynthesizer(
         )
     }
 
-    private fun applyAppendToLocalTarget(target: AccessExpr, value: AbstractValue) {
+    private fun applyPlusAssignToLocalTarget(target: AccessExpr, value: AbstractValue) {
         val resolved = resolveLocalTargetPath(target) ?: return
         val current = env[resolved.base] ?: return
         val existing = descendBySegments(current.shape, resolved.segments)
-        val nextLeaf = when (existing) {
-            is ValueShape.ArrayShape -> ValueShape.ArrayShape(mergeValueShape(existing.element, value.shape))
-            else -> ValueShape.ArrayShape(value.shape)
-        }
+        val nextLeaf = plusAssignShape(AbstractValue(existing), value)
         val nextShape = writeShapeAtPath(current.shape, resolved.segments, nextLeaf)
         env[resolved.base] = current.copy(
             shape = nextShape,
             evidence = (current.evidence + value.evidence).distinct(),
         )
+    }
+
+    private fun plusAssignShape(previous: AbstractValue?, value: AbstractValue): ValueShape {
+        val previousShape = previous?.shape ?: ValueShape.Unknown
+        return when {
+            previous?.emptyArraySeed == true -> ValueShape.ArrayShape(value.shape)
+            previousShape is ValueShape.ArrayShape ->
+                ValueShape.ArrayShape(mergeValueShape(previousShape.element, value.shape))
+            previousShape == ValueShape.TextShape || value.shape == ValueShape.TextShape -> ValueShape.TextShape
+            previousShape == ValueShape.NumberShape && value.shape == ValueShape.NumberShape -> ValueShape.NumberShape
+            else -> mergeValueShape(previousShape, value.shape)
+        }
     }
 
     private fun applyModifyToLocalTarget(

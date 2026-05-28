@@ -9,9 +9,9 @@ class ConformPathsTest {
     @Test
     fun set_and_append_inside_object() {
         val program = """
-            TRANSFORM T { LET obj = {};
+            TRANSFORM T { LET obj = { items: [] };
                 SET obj.x = 1;
-                APPEND TO obj.items 2 INIT [];
+                obj.items += 2;
                 OUTPUT { obj: obj }
             }
         """.trimIndent()

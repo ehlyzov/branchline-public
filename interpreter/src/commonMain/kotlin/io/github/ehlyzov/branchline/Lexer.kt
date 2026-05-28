@@ -49,8 +49,6 @@ class Lexer(private val source: String) {
         "WHERE" to TokenType.WHERE,
         "SET" to TokenType.SET,
         "APPEND" to TokenType.APPEND,
-        "TO" to TokenType.TO,
-        "INIT" to TokenType.INIT,
     )
 
     fun lex(): List<Token> {
@@ -79,6 +77,8 @@ class Lexer(private val source: String) {
                     if (!isAtEnd() && peek() == '+') {
                         advance()
                         add(TokenType.CONCAT, "++", startLine, startCol)
+                    } else if (match('=')) {
+                        add(TokenType.PLUS_ASSIGN, "+=", startLine, startCol)
                     } else {
                         add(TokenType.PLUS, "+", startLine, startCol)
                     }

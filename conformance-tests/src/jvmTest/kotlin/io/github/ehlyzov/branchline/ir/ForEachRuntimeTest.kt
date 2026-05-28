@@ -78,9 +78,9 @@ class ForEachRuntimeTest {
     @EngineTest
     fun `accumulates across iterations in single loop`(engine: ExecutionEngine) {
         val program = """
-            LET acc = {};
+            LET acc = { values: [] };
             FOR i IN [1, 2, 3] {
-                APPEND TO acc.values i INIT [];
+                acc.values += i;
             }
             OUTPUT acc;
         """.trimIndent()
@@ -93,12 +93,12 @@ class ForEachRuntimeTest {
     @EngineTest
     fun `preserves accumulators across multiple loops`(engine: ExecutionEngine) {
         val program = """
-            LET acc = {};
+            LET acc = { a: [], b: [] };
             FOR i IN [1, 2] {
-                APPEND TO acc.a i INIT [];
+                acc.a += i;
             }
             FOR j IN [10, 20] {
-                APPEND TO acc.b j INIT [];
+                acc.b += j;
             }
             OUTPUT acc;
         """.trimIndent()
@@ -117,7 +117,7 @@ class ForEachRuntimeTest {
             LET acc = {};
             FOR prod IN row.products {
                 FOR attr IN prod.characteristics {
-                    APPEND TO acc.[attr] prod INIT [];
+                    SET acc.[attr] = APPEND(acc.[attr] ?? [], prod);
                 }
             }
             OUTPUT acc;
@@ -189,7 +189,7 @@ class ForEachRuntimeTest {
               LET acc = [];
               FOR n IN [1,2,3] {
                 SET sum = sum + n;
-                APPEND TO acc n INIT [];
+                acc += n;
               }
               OUTPUT { sum: sum, acc: acc };
             """.trimIndent(),

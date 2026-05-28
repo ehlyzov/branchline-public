@@ -21,7 +21,7 @@ class Compiler(
     private val hostFns: Map<String, (List<Any?>) -> Any?> = emptyMap(),
     private val useLocals: Boolean = true,
 ) {
-    /** Quick metrics for instruction counts emitted in fast/slow SET/APPEND paths. */
+    /** Quick metrics for instruction counts emitted in fast/slow SET/+= paths. */
     object Metrics {
         @Volatile
         var setFastPathInstr: Int = 0
@@ -116,8 +116,8 @@ class Compiler(
             is IRLet -> compileLet(node)
             is IRSet -> compileSet(node)
             is IRSetVar -> compileSetVar(node)
-            is IRAppendTo -> compileAppendTo(node)
-            is IRAppendVar -> compileAppendVar(node)
+            is IRPlusAssign -> compilePlusAssign(node)
+            is IRPlusAssignVar -> compilePlusAssignVar(node)
             is IRModify -> compileModify(node)
             is IROutput -> compileOutput(node)
             is IRExprOutput -> compileExprOutput(node)
@@ -243,29 +243,20 @@ class Compiler(
         } else emit(STORE_VAR(node.name))
     }
 
-    private fun compileAppendTo(node: IRAppendTo) {
+    private fun compilePlusAssign(node: IRPlusAssign) {
         val before = instructions.size
-        // Fast-path: APPEND TO root.staticKey elem INIT init
+        // Fast-path: root.staticKey += value
         val target = node.target
         val baseIdent = target.base as? IdentifierExpr
         val staticSeg = target.segs.singleOrNull() as? AccessSeg.Static
         if (baseIdent != null && staticSeg != null) {
             val root = baseIdent.name
             val key = staticSeg.key
-            // stack: elem
             compileExpr(node.value)
-            // push init (or empty [])
-            node.init?.let { compileExpr(it) } ?: emit(MAKE_ARRAY(0))
-            // load current array: result.items
             emit(LOAD_VAR(root))
             emit(ACCESS_STATIC(key))
-            // COALESCE(current, init): need (left=current, right=init) with right on top
             emit(SWAP)
-            emit(COALESCE)
-            // Now have elem (bottom), array (top). Want (array, elem)
-            emit(SWAP)
-            emit(APPEND)
-            // Write back to result
+            emit(PLUS_ASSIGN)
             emit(LOAD_VAR(root))
             emit(SWAP)
             emit(SET_STATIC(key))
@@ -278,41 +269,18 @@ class Compiler(
                     segments = listOf(PathSegmentMeta.Static(key)),
                 )
             )
-            Metrics.setFastPathInstr += (instructions.size - before)
+            Metrics.appendFastPathInstr += (instructions.size - before)
             return
         }
-        // Generic path
         compileExpr(node.value)
-        val initExpr = node.init
-        if (initExpr != null) {
-            compileExpr(initExpr)
-        } else {
-            emit(PUSH(emptyList<Any?>()))
-        }
-        compileAccessExprForAppend(node.target, initProvided = initExpr != null)
+        compileAccessExprForPlusAssign(node.target)
         Metrics.appendGeneralInstr += (instructions.size - before)
     }
 
-    private fun compileAppendVar(node: IRAppendVar) {
-        val valVar = nextTemp("val")
-        val initVar = nextTemp("init")
-
-        compileExpr(node.value)
-        emit(STORE_VAR(valVar))
-
-        val initExpr = node.init
-        if (initExpr != null) {
-            compileExpr(initExpr)
-        } else {
-            emit(PUSH(emptyList<Any?>()))
-        }
-        emit(STORE_VAR(initVar))
-
+    private fun compilePlusAssignVar(node: IRPlusAssignVar) {
         emit(LOAD_VAR(node.name))
-        emit(LOAD_VAR(initVar))
-        emit(COALESCE)
-        emit(LOAD_VAR(valVar))
-        emit(APPEND)
+        compileExpr(node.value)
+        emit(PLUS_ASSIGN)
         val storeIndex = emitStoreRoot(node.name)
         recordPathWrite(
             storeIndex,
@@ -1003,36 +971,27 @@ class Compiler(
         )
     }
 
-    private fun compileAccessExprForAppend(target: AccessExpr, initProvided: Boolean) {
-        // Stack precondition (from caller): elem (top), init list below
+    private fun compileAccessExprForPlusAssign(target: AccessExpr) {
+        // Stack precondition (from caller): value on top.
         val valVar = nextTemp("val")
-        val initVar = nextTemp("init")
-        // Stack on entry: value (bottom), init (top). Store init first, then value.
-        emit(STORE_VAR(initVar))
         emit(STORE_VAR(valVar))
 
         val (baseName, segs) = preparePath(target)
-        require(segs.isNotEmpty()) { "APPEND expects at least one access segment" }
+        require(segs.isNotEmpty()) { "'+=' expects at least one access segment" }
 
         // Walk to parent of leaf
         val objVars = loadChainObjects(baseName, segs)
 
-        // Load current at leaf, coalesce with init
+        // Load current at leaf and apply '+='.
         val (leafSeg, leafDyn) = segs.last()
         val parentVar = objVars.last()
         emit(LOAD_VAR(parentVar))
         loadKey(leafSeg, leafDyn)
         accessWithKeyLoaded(leafSeg)
-        emit(LOAD_VAR(initVar))
-        // COALESCE expects (left=current, right=init) with right on top
-        emit(COALESCE)
-
-        // Load element and append
         emit(LOAD_VAR(valVar))
-        // Stack: array, elem (elem on top)
-        emit(APPEND)
+        emit(PLUS_ASSIGN)
 
-        // Rebuild to root with updated array on stack
+        // Rebuild to root with updated value on stack.
         val storeIndex = rebuildToRoot(baseName, segs, objVars)
         recordPathWrite(
             storeIndex,

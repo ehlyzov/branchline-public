@@ -18,12 +18,12 @@ import io.github.ehlyzov.branchline.TokenType
 import io.github.ehlyzov.branchline.debug.CollectingTracer
 import io.github.ehlyzov.branchline.debug.TraceEvent
 import io.github.ehlyzov.branchline.debug.TraceOptions
-import io.github.ehlyzov.branchline.ir.IRAppendTo
-import io.github.ehlyzov.branchline.ir.IRAppendVar
 import io.github.ehlyzov.branchline.ir.IRExprOutput
 import io.github.ehlyzov.branchline.ir.IRLet
 import io.github.ehlyzov.branchline.ir.IRNode
 import io.github.ehlyzov.branchline.ir.IROutput
+import io.github.ehlyzov.branchline.ir.IRPlusAssign
+import io.github.ehlyzov.branchline.ir.IRPlusAssignVar
 import io.github.ehlyzov.branchline.ir.IRSet
 import io.github.ehlyzov.branchline.ir.IRSetVar
 import io.github.ehlyzov.branchline.I32
@@ -49,9 +49,9 @@ class VMTracingTest {
 
     @Test
     fun pathWrite_append_dynamic_resolves_runtime_key() {
-        val letObject = IRLet("o", obj())
+        val letObject = IRLet("o", obj(literal("foo", emptyArrayExpr())))
         val letKey = IRLet("k", str("foo"))
-        val append = IRAppendTo(accessDynamic("o", ident("k")), num(5), emptyArrayExpr())
+        val append = IRPlusAssign(accessDynamic("o", ident("k")), num(5))
         val output = IRExprOutput(ident("o"))
 
         val run = runWithTracer(listOf(letObject, letKey, append, output))
@@ -60,14 +60,14 @@ class VMTracingTest {
         assertEquals("APPEND", pathWrite.op)
         assertEquals("o", pathWrite.root)
         assertEquals(listOf("foo"), pathWrite.path)
-        assertEquals(null, pathWrite.old)
+        assertEquals(emptyList<Any?>(), pathWrite.old)
         assertEquals(listOf(5), pathWrite.new)
     }
 
     @Test
     fun pathWrite_append_var_captures_full_variable_change() {
         val letAcc = IRLet("acc", emptyArrayExpr())
-        val append = IRAppendVar("acc", num(10), null)
+        val append = IRPlusAssignVar("acc", num(10))
         val output = IRExprOutput(ident("acc"))
 
         val run = runWithTracer(listOf(letAcc, append, output))

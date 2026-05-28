@@ -4,8 +4,18 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-04-30
+last_updated: 2026-05-05
 changelog:
+  - date: 2026-05-29
+    change: "Added mutation runtime diagnostic adapters for SET/+= failures with stable code/category/payload fields."
+  - date: 2026-05-29
+    change: "Added structured diagnostics taxonomy and payload model for repair-oriented authoring loops."
+  - date: 2026-05-05
+    change: "Started DX execution: added normalization corpus baseline and promoted inspect JSON to a stable machine envelope with compatibility contract fields."
+  - date: 2026-05-05
+    change: "Completed the product direction for Branchline DX: prioritized friendly mutation operations, stable inspect machine JSON, repair-oriented diagnostics, example metadata, playground workbench, and DX quality gates."
+  - date: 2026-05-05
+    change: "Replaced the earlier APPEND TO direction with a two-layer model: comprehensions for transformation-first collection building and += for explicit local accumulators."
   - date: 2026-04-30
     change: "Started Normalization MVP slice under M3: AST renderer, BranchlineFacade.inspect normalizedSource population, and bl inspect --normalized flag."
   - date: 2026-04-20
@@ -47,6 +57,45 @@ The first 90 days should optimize Branchline for pure data transformation AI use
 - evolving CLI and playground around an inspect-first AI workflow.
 
 VM optimization, pipeline orchestration, and broader runtime features remain valuable, but they should be treated as secondary to canonicalization and machine-facing ergonomics during this phase.
+
+## DX priority order (as of 2026-05-05)
+The largest near-term DX gain is not a new runtime feature. It is making the existing transformation language feel intentional, canonical, and repairable.
+
+Priority order:
+
+1. **Two-layer mutation style.** Prefer comprehensions/collection expressions for transformation-first data shaping, and use `+=` only for explicit local accumulators. This removes both the artificial `SET x = APPEND(x, ...)` pattern and the DSL-specific `APPEND TO` statement while preserving pure `APPEND(list, value)` for expression contexts.
+2. **Stable inspect-first machine JSON.** Make `bl inspect --contracts-json --normalized` return one documented envelope with `success`, diagnostics, feature usage, subset compatibility, contracts, and normalized source.
+3. **Repair-oriented diagnostics.** Add stable codes, spans, target paths, expected/actual payloads, and hints for the most common authoring errors.
+4. **Canonical docs and examples.** Turn docs/playground examples into the source of canonical style, including anti-pattern to corrected-pattern pairs.
+5. **Retrieval-ready example metadata.** Add id/category/tags/expectation/subset metadata so agents retrieve verified patterns, not just similar text.
+6. **Playground workbench.** Add normalized source, diagnostics, subset blockers, and contract diff panes after the machine API is stable.
+
+## Mutation policy
+Branchline should keep its persistent/functional runtime semantics, but its surface syntax should avoid DSL-specific mutation verbs.
+
+Canonical authoring rules:
+
+- Prefer array comprehensions or future `COLLECT`-style expressions when the output is a direct mapping/filtering of input.
+- Use `target += value` for real local accumulators.
+- Use `SET name = expression` for rebinding a local value.
+- Use `SET object.path = expression` for replacing or inserting a local object/path leaf under existing parents.
+- Use `MODIFY object.path { key: value }` for grouped local object updates once docs and diagnostics make its target constraints clear.
+- Use `APPEND(list, value)` only when an expression value is required, for example inside object construction or a function argument.
+
+Non-goals:
+
+- Do not remove or deprecate `APPEND(list, value)` as a pure stdlib function.
+- Do not keep `APPEND TO` as a legacy statement; the language is still in design phase, so this is a hard cut.
+- Do not introduce hidden in-place mutation; runtime should continue returning updated persistent values.
+- Do not auto-create missing intermediate containers for `SET` or `+=` without a separate language design.
+- Do not include shared writes, `SHARED`, `AWAIT`, `SUSPEND`, or graph orchestration in the AI canonical subset MVP.
+
+Normalization direction:
+
+- Existing renderer output should emit `+=` for explicit accumulator statements and never emit `APPEND TO`.
+- A future rewrite may transform `SET x = APPEND(x, value)` into `x += value` only when `x` is the same simple local identifier on both sides and no path/dynamic alias is involved.
+- Unsafe rewrites such as `SET obj.items = APPEND(obj.items, value)`, dynamic paths, shadowed names, or any ambiguous target should remain unchanged until a separate semantic proof exists.
+- Guard conditions are pinned by the normalization corpus: path targets, dynamic targets, and alias-ambiguous self-append patterns must remain `SET ... = APPEND(...)` until T16 explicitly accepts and implements a safe rewrite.
 
 ## Milestone M1: Canonical Core
 Define an explicit `AI canonical subset` of Branchline for code generation and retrieval.
@@ -133,6 +182,58 @@ Define the contract-first workflow that an AI agent should follow when generatin
 - CLI should gain an inspect/check style interface centered on machine-readable output, not only execution.
 - Playground should evolve into an AI workbench with panes for normalized source, contract diff, explain output, and structured failures.
 - Docs should prefer canonical examples, anti-pattern to corrected-pattern pairs, null/contract behavior examples, and deterministic stdlib behavior tables.
+
+## Milestone M4: Stable Machine Envelope and Diagnostics
+Promote inspect output from a contract helper into the public machine-facing authoring contract.
+
+### Goals
+- Return one stable JSON envelope for inspect that includes success/failure, diagnostics, warnings, feature usage, subset compatibility, normalized source, contracts, and optional witness/debug metadata.
+- Keep envelope evolution additive by default and document any migration before removing or renaming fields.
+- Classify diagnostics as syntax, semantic, contract, runtime, unsupported-subset, or normalization.
+- Add repair-oriented fields where available: operation, target path, expected kind, actual kind, expected/actual contract fragment, and deterministic hint.
+
+### Deliverables
+- CLI JSON snapshot tests for compatible, incompatible, parse error, semantic error, and normalization warning cases. The first envelope slice now covers compatible, incompatible, parse error, and no-normalized cases.
+- Mutation diagnostics fixtures for missing append target, non-list init, missing mid-path, and wrong target kind.
+- Contract mismatch fixture with expected/actual payload.
+- Documentation for the inspect envelope and diagnostic evolution policy.
+
+## Milestone M5: Canonical Corpus and DX Gates
+Make canonical style durable by moving it into docs, examples, metadata, and verification gates.
+
+### Goals
+- Rewrite high-impact docs and playground examples to prefer canonical mutation style.
+- Add example metadata fields: `id`, `category`, `tags`, `aiSubset`, and at least one of expected output, contract expectation, or diagnostic expectation for migrated examples.
+- Add a normalization corpus with at least 20 equivalent inputs and pinned canonical output.
+- Define a DX quality gate matrix keyed by touched surface: syntax, normalizer, diagnostics, CLI JSON, examples, docs, playground.
+
+### Deliverables
+- Public AI canonical subset/style guide in docs.
+- Golden normalization corpus baseline with 20+ fixtures and idempotence checks.
+- Top 20 playground examples migrated to retrieval-ready metadata.
+- Example tests that fail on invalid metadata or incorrect AI subset tags.
+- Development verification matrix aligned with `development/service/VERIFY.md`.
+
+### DX quality gate seed
+The DX quality gate matrix should start with these rows and stay aligned with `development/service/VERIFY.md`:
+
+| Touched surface | Required narrow verification |
+| --- | --- |
+| Parser, AST, or grammar | `./gradlew :interpreter:jvmTest :interpreter:jsTest :conformance-tests:jvmTest :conformance-tests:jsTest` |
+| Normalizer or AI subset | `./gradlew :interpreter:jvmTest :interpreter:jsTest` |
+| CLI inspect JSON | `./gradlew :cli:jvmTest :cli:jsNodeTest` |
+| Playground examples metadata | `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest` |
+| Public docs | `./gradlew docsBuild` |
+| Playground UI/assets | `./gradlew playgroundBuildAssets` |
+| Contour trigger | `bin/audit_contour.sh` and refresh overlays only when required |
+
+## Product package
+The product-level planning package for this direction lives under [development/product/branchline-dx](../product/branchline-dx/overview.md):
+
+- [Overview](../product/branchline-dx/overview.md)
+- [Implementation plan](../planning/branchline-dx-implementation-plan.md)
+- [Hardening plan](../planning/branchline-dx-hardening-plan.md)
+- [Gap registry](../planning/branchline-dx-gap.yaml)
 
 ## Acceptance criteria for this initiative
 The initiative should be considered delivered only when all of the following are true:

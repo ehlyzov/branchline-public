@@ -15,10 +15,10 @@ topDecl          ::= transformDecl | funcDecl | typeDecl | sharedDecl | **;** ;
 name             ::= IDENTIFIER | softKeyword                               ;
 softKeyword      ::= **ABORT** | **APPEND** | **AS** | **BACKOFF**
                    | **buffer** | **CALL** | **enum** | **FOREACH**
-                   | **FUNC** | **INIT** | **LET** | **MANY**
+                   | **FUNC** | **LET** | **MANY**
                    | **MODIFY** | **OPTIONS** | **OUTPUT** | **RETRY** | **RETURN**
                    | **SET** | **SHARED** | **SINGLE**
-                   | **THROW** | **TIMES** | **TO**
+                   | **THROW** | **TIMES**
                    | **TRANSFORM** | **TYPE** | **union** | **USING**       ;
 
 #---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ simpleType       ::= **string** | **bytes** | **number** | **boolean** | **null*
 block            ::= "{" statement* "}"  |  INDENT statement+ DEDENT         ;
 
 statement        ::= letStmt | ifStmt | forStmt | tryStmt | callStmt
-                   | setStmt | appendStmt | modifyStmt | returnStmt
+                   | setStmt | plusAssignStmt | modifyStmt | returnStmt
                    | sharedWrite | suspendStmt | abortStmt | throwStmt
                    | nestedOutput | expressionStmt | **;**                   ;
 
@@ -93,8 +93,7 @@ optAwait         ::= **AWAIT**?                                              ;
 arrow            ::= "->" | "=>"                                             ;
 retrySpec        ::= **RETRY** NUMBER **TIMES** ( **BACKOFF** STRING )?       ;
 setStmt          ::= **SET** setTarget "=" expression **;**                 ;
-appendStmt       ::= **APPEND** **TO** setTarget expression
-                     ( **INIT** expression )? **;**                          ;
+plusAssignStmt   ::= setTarget "+=" expression **;**                        ;
 modifyStmt       ::= **MODIFY** modifyTarget modifyBlock **;**               ;
 returnStmt       ::= **RETURN** expression? **;**                            ;
 sharedWrite      ::= name "[" expression? "]" "=" expression **;**           ;

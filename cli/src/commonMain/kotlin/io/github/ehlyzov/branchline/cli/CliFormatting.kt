@@ -1,5 +1,7 @@
 package io.github.ehlyzov.branchline.cli
 
+import io.github.ehlyzov.branchline.BranchlineDiagnostic
+
 public enum class OutputFormat(val id: String, val pretty: Boolean) {
     JSON("json", true),
     JSON_COMPACT("json-compact", false),
@@ -64,4 +66,5 @@ public data class CliError(
     val message: String,
     val kind: CliErrorKind,
     val command: CliCommand?,
+    val diagnostic: BranchlineDiagnostic? = null,
 )

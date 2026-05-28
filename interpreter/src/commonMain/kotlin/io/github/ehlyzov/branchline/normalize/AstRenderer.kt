@@ -4,8 +4,6 @@ import io.github.ehlyzov.branchline.AbortStmt
 import io.github.ehlyzov.branchline.AccessExpr
 import io.github.ehlyzov.branchline.AccessSeg
 import io.github.ehlyzov.branchline.AdapterSpec
-import io.github.ehlyzov.branchline.AppendToStmt
-import io.github.ehlyzov.branchline.AppendToVarStmt
 import io.github.ehlyzov.branchline.ArrayCompExpr
 import io.github.ehlyzov.branchline.ArrayExpr
 import io.github.ehlyzov.branchline.ArrayTypeRef
@@ -50,6 +48,8 @@ import io.github.ehlyzov.branchline.ObjKey
 import io.github.ehlyzov.branchline.ObjectExpr
 import io.github.ehlyzov.branchline.OutputDecl
 import io.github.ehlyzov.branchline.OutputStmt
+import io.github.ehlyzov.branchline.PlusAssignStmt
+import io.github.ehlyzov.branchline.PlusAssignVarStmt
 import io.github.ehlyzov.branchline.PrimitiveType
 import io.github.ehlyzov.branchline.PrimitiveTypeRef
 import io.github.ehlyzov.branchline.Program
@@ -264,23 +264,14 @@ public object AstRenderer {
                 sb.append("SET ").append(stmt.name).append(" = ")
                 appendExprBreaking(sb, stmt.value, indent)
             }
-            is AppendToStmt -> {
-                sb.append("APPEND TO ")
+            is PlusAssignStmt -> {
                 sb.append(renderExpr(stmt.target))
-                sb.append(' ')
+                sb.append(" += ")
                 appendExprBreaking(sb, stmt.value, indent)
-                stmt.init?.let {
-                    sb.append(" INIT ")
-                    appendExprBreaking(sb, it, indent)
-                }
             }
-            is AppendToVarStmt -> {
-                sb.append("APPEND TO ").append(stmt.name).append(' ')
+            is PlusAssignVarStmt -> {
+                sb.append(stmt.name).append(" += ")
                 appendExprBreaking(sb, stmt.value, indent)
-                stmt.init?.let {
-                    sb.append(" INIT ")
-                    appendExprBreaking(sb, it, indent)
-                }
             }
             is ModifyStmt -> renderModify(sb, stmt, indent)
             is OutputStmt -> {

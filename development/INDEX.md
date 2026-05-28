@@ -6,6 +6,28 @@ supersedes: ['planning/current-research-tasks']
 superseded_by: []
 last_updated: 2026-04-30
 changelog:
+  - date: 2026-05-29
+    change: "Implemented Branchline DX hardening H3 for additive diagnostics model evolution."
+  - date: 2026-05-29
+    change: "Implemented Branchline DX T8 mutation runtime diagnostic adapters and CLI JSON error propagation."
+  - date: 2026-05-29
+    change: "Implemented Branchline DX T7 diagnostics taxonomy and payload model."
+  - date: 2026-05-29
+    change: "Implemented Branchline DX hardening H1/H2/H5 for facade envelope boundary, normalization rewrite invariants, and inspect JSON leakage guards."
+  - date: 2026-05-05
+    change: "Implemented Branchline DX T5/T6: added normalization corpus baseline and stable inspect JSON envelope with CLI tests and docs."
+  - date: 2026-05-05
+    change: "Implemented Branchline DX T4 docs drift audit: array comprehension docs now match parser/EBNF syntax."
+  - date: 2026-05-05
+    change: "Implemented Branchline DX T3 mutation example rewrite: named playground accumulators now use += and docs frame APPEND as expression-style."
+  - date: 2026-05-05
+    change: "Implemented Branchline DX T2 public canonical subset docs: added AI canonical subset page and inspect-first CLI workflow."
+  - date: 2026-05-05
+    change: "Implemented Docs Generate Diplodoc CLI Fix: docsGenerate now resolves @diplodoc/cli and toc.yaml declares linked docs pages so docsBuild passes."
+  - date: 2026-05-05
+    change: "Added Branchline DX product package, implementation plan, hardening plan, gap registry, and completed AI-Friendly DSL direction with friendly mutation operations and DX gates."
+  - date: 2026-05-05
+    change: "Implemented Two-Layer Mutation Syntax hard-cut: removed statement-level append syntax and introduced += for explicit local accumulators across parser, runtime, VM, docs, playground keywords, and tests."
   - date: 2026-04-30
     change: "Tracked and implemented playground Kotlin/JS dependency loading, docs/assets cleanup, and decimal-domain JMH summary fixes."
   - date: 2026-04-30
@@ -115,13 +137,18 @@ This index is the canonical entry point for the /development knowledge base. All
 
 ### Proposed
 - [AI-Friendly DSL](ai/ai-friendly-dsl.md) -- umbrella plan for canonical subset, stable machine interface, and contract-first AI authoring workflow.
+- [Branchline DX Product Overview](product/branchline-dx/overview.md) -- product package for AI-friendly DSL completion, friendly mutations, canonical docs/examples, diagnostics, playground workbench, and DX gates.
+- [Branchline DX Implementation Plan](planning/branchline-dx-implementation-plan.md) -- command-level T-task plan for the Branchline DX product scenarios.
+- [Branchline DX Hardening Plan](planning/branchline-dx-hardening-plan.md) -- architecture/security/maintainability H-task plan for Branchline DX implementation.
 - [Advanced CLI](tooling/advanced-cli.md) -- CLI+CI scripting plan.
 - [Implicit Transform (CLI)](tooling/implicit-transform-cli.md) -- opt-in single-transform wrapper mode.
 - [LLM Pipelines](ai/llm-pipelines.md) -- pipeline runtime spec.
 - [Planitforme Integration](ai/planitforme-integration.md) -- migration sketches; depends on LLM Pipelines.
 - [Tree Structures](runtime/tree-structures.md) -- arena/array tree structure recommendations.
 - [I/O Contract Gap Analysis](language/io-contracts-gap-analysis.md) -- parser + I/O contract comparison and enrichment targets.
+- [Two-Layer Mutation Syntax](language/two-layer-mutation-syntax.md) -- implemented two-layer mutation model with comprehensions plus += accumulators.
 - [Benchmarks Docs Fix Plan](docs/benchmarks-docs-fix-plan.md) -- MkDocs/benchmarks patch plan.
+- [Docs Generate Diplodoc CLI Fix](docs/docs-generate-diplodoc-cli-fix.md) -- root-cause fix for docsGenerate npm executable resolution.
 - [Docs + Playground Plan](docs/docs-playground-plan.md) -- docs plan; depends on Docs Refresh.
 - [I/O Contracts Milestone Plan](planning/io-contracts-milestone-plan.md) -- implementation order and agent instructions.
 - [Input-Type-Seeded Output Inference](planning/input-type-seeded-output-inference.md) -- hybrid plan to infer output from flow while seeding inference with declared input types when output is wildcard.
@@ -156,6 +183,7 @@ This index is the canonical entry point for the /development knowledge base. All
 - [Contract Model (Strict)](language/contract-model-v3.md) -- strict node-kinded model with quantified obligations, domains, satisfiability, and witnesses.
 - [Contract Inference Static Analysis](language/contract-inference-static-analysis.md) -- flow-sensitive inference with literal bracket precision and empty-array append stability.
 - [Contract Diagnostics](language/contract-diagnostics-v2.md) -- deterministic mismatch reporting without static evidence dependency.
+- [Diagnostics Taxonomy](language/diagnostics-taxonomy.md) -- structured diagnostic categories and optional payload model for repair-oriented Branchline authoring.
 - [Contract Inference Milestone Plan](planning/contract-inference-v2-milestone-plan.md) -- completed milestone sequence and cleanup order.
 - [Contract Inference Quality Gates](docs/contract-inference-quality-gates.md) -- precision/parity/performance plus structural/debug metadata gates.
 - [Contract JSON Cleanup](planning/contract-v2-json-cleanup.md) -- completed canonical JSON cleanup and rollout notes.
@@ -189,6 +217,7 @@ This index is the canonical entry point for the /development knowledge base. All
 - **Docs**: `docs/*`
 - **Language**: `language/*`
 - **Perf**: `perf/*`
+- **Product**: `product/*`
 - **Quality**: `quality/*`
 - **Runtime**: `runtime/*`
 - **Tooling**: `tooling/*`

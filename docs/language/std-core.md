@@ -13,7 +13,7 @@ Utilities for working with objects and arrays.
 - `GET(obj, key[, default])` → value at key or `default` when missing. Errors if not an object.
 - `PUT(coll, key, value)` → new list/object with entry added or replaced. List indexes must be within `0..size` (append when equal to size).
 - `DELETE(coll, key)` → remove an entry by key/index. Errors if out of bounds or unsupported type.
-- `APPEND(list, value)` / `PREPEND(list, value)` → new lists with value at the end/start.
+- `APPEND(list, value)` / `PREPEND(list, value)` → new lists with value at the end/start. Use these as expression-style helpers; for explicit accumulator updates prefer `items += value`.
 - `WALK(tree)` → sequence describing each node: `path`, `key`, `value`, `depth`, `isLeaf`. Works on objects and lists; other values yield a single leaf entry.
 - `COLLECT(iterable)` → list from a sequence/iterable. Errors on unsupported types.
 - `IS_OBJECT(x)` → boolean indicating object-ness (maps only).

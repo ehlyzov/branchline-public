@@ -10,7 +10,6 @@ import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 
 def npmCommand = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npm.cmd' : 'npm'
-def npxCommand = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npx.cmd' : 'npx'
 
 allprojects {
     repositories {
@@ -165,7 +164,8 @@ tasks.register('docsGenerate', Exec) {
     description = 'Generates Diplodoc output into docs-compiled'
     dependsOn 'playgroundBuildAssets'
     workingDir projectDir
-    commandLine npxCommand, 'yfm', 'build', '-i', 'docs', '-o', 'docs-compiled'
+    commandLine npmCommand, 'exec', '--yes', '--package', '@diplodoc/cli@5.36.6', '--',
+        'yfm', 'build', '-i', 'docs', '-o', 'docs-compiled'
     inputs.dir("$projectDir/docs")
     inputs.dir("$projectDir/docs/assets")
     outputs.dir("$projectDir/docs-compiled")

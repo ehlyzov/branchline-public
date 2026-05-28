@@ -5,6 +5,10 @@ import io.github.ehlyzov.branchline.AccessSeg
 import io.github.ehlyzov.branchline.ArrayCompExpr
 import io.github.ehlyzov.branchline.ArrayExpr
 import io.github.ehlyzov.branchline.BinaryExpr
+import io.github.ehlyzov.branchline.BranchlineDiagnostic
+import io.github.ehlyzov.branchline.BranchlineDiagnosticCategory
+import io.github.ehlyzov.branchline.BranchlineDiagnosticPayload
+import io.github.ehlyzov.branchline.BranchlineDiagnosticSeverity
 import io.github.ehlyzov.branchline.BlockBody
 import io.github.ehlyzov.branchline.BoolExpr
 import io.github.ehlyzov.branchline.CallExpr
@@ -70,7 +74,7 @@ import kotlinx.collections.immutable.toPersistentList
 /**
  * Executes an IR program and collects OUTPUT objects. Design goals:
  * - Small focused helpers and unified path navigation.
- * - De-duplicated logic between SET and APPEND TO via a shared write
+ * - De-duplicated logic between SET and += via a shared write
  *   pipeline.
  * - Clear type/index checks in one place.
  * - Predictable immutable updates for containers.
@@ -803,10 +807,17 @@ class Exec(
 
     // --- Path traversal (to parent of the last segment)
     private fun traverseToParent(target: AccessExpr, env: Env, opName: String): PathContext {
-        val rootIdent = target.base as? IdentifierExpr ?: error("$opName target must start with identifier")
+        val rootIdent = target.base as? IdentifierExpr ?: mutationRuntimeError(
+            code = "mutation_target_invalid",
+            message = "$opName target must start with identifier",
+            operation = opName,
+            expectedKind = "identifier-rooted path",
+            actualKind = target.base::class.simpleName ?: "unknown",
+            hint = "Use a local variable or a path rooted at a local variable as the mutation target.",
+        )
         val rootName = rootIdent.name
-        val rootScope = env.resolveScope(rootName) ?: error("$opName variable '$rootName' not found")
-        val rootVal = rootScope.getLocal(rootName) ?: error("$opName variable '$rootName' not found")
+        val rootScope = env.resolveScope(rootName) ?: missingMutationTarget(opName, rootName)
+        val rootVal = rootScope.getLocal(rootName) ?: missingMutationTarget(opName, rootName)
         val frames = mutableListOf<Frame>()
         var cur = rootVal as Any?
 
@@ -827,7 +838,11 @@ class Exec(
     private fun stepStatic(cur: Any?, key: ObjKey, frames: MutableList<Frame>, op: String): Any? = when (cur) {
         is Map<*, *> -> {
             val k = unwrapKey(key)
-            val next = cur[k] ?: failAt(op, "<root>", frames, "segment '$k' not found")
+            val next = cur[k] ?: missingMutationPath(
+                op = op,
+                message = "$op: segment '$k' not found at ${pathToString("<root>", frames)}",
+                targetPath = pathToString("<root>", frames, k),
+            )
             frames += Frame(cur, k)
             next
         }
@@ -839,13 +854,24 @@ class Exec(
             cur[idx]
         }
 
-        else -> error("$op path enters non-container value")
+        else -> mutationRuntimeError(
+            code = "mutation_path_non_container",
+            message = "$op path enters non-container value",
+            operation = op,
+            expectedKind = "object or list",
+            actualKind = runtimeKind(cur),
+            hint = "Initialize each parent path segment as an object or list before mutating a nested path.",
+        )
     }
 
     private fun stepDynamic(cur: Any?, dyn: Any?, frames: MutableList<Frame>, op: String): Any? = when (cur) {
         is Map<*, *> -> {
             val k = mapKeyFromDynamic(dyn)
-            val next = cur[k] ?: error("$op path segment '$k' not found")
+            val next = cur[k] ?: missingMutationPath(
+                op = op,
+                message = "$op path segment '$k' not found",
+                targetPath = pathToString("<root>", frames, k),
+            )
             frames += Frame(cur, k)
             next
         }
@@ -857,11 +883,18 @@ class Exec(
             cur[idx]
         }
 
-        else -> error("$op path enters non-container value")
+        else -> mutationRuntimeError(
+            code = "mutation_path_non_container",
+            message = "$op path enters non-container value",
+            operation = op,
+            expectedKind = "object or list",
+            actualKind = runtimeKind(cur),
+            hint = "Initialize each parent path segment as an object or list before mutating a nested path.",
+        )
     }
 
     // --- Leaf resolution / read / write
-    private fun resolveLeafAddress(parent: Any?, last: AccessSeg, env: Env): LeafAddress = when (parent) {
+    private fun resolveLeafAddress(parent: Any?, last: AccessSeg, env: Env, opName: String): LeafAddress = when (parent) {
         is Map<*, *> -> {
             val key: Any = when (last) {
                 is AccessSeg.Static -> unwrapKey(last.key)
@@ -879,7 +912,14 @@ class Exec(
             LeafAddress(CKind.LIST, idx)
         }
 
-        else -> error("Target parent must be object or list")
+        else -> mutationRuntimeError(
+            code = "mutation_target_wrong_kind",
+            message = "Target parent must be object or list",
+            operation = opName,
+            expectedKind = "object or list",
+            actualKind = runtimeKind(parent),
+            hint = "Mutate a path whose parent is an existing object or list.",
+        )
     }
 
     private fun readAt(parent: Any?, addr: LeafAddress): Any? = when (addr.kind) {
@@ -893,9 +933,62 @@ class Exec(
         if (tail != null) append('.').append(tail)
     }
 
-    private fun failAt(op: String, root: String, frames: List<Frame>, msg: String): Nothing {
-        val where = pathToString(root, frames)
-        error("$op: $msg at $where")
+    private fun missingMutationTarget(op: String, targetPath: String): Nothing =
+        mutationRuntimeError(
+            code = "mutation_target_missing",
+            message = "${if (op == "+=") "'+='" else op} variable '$targetPath' not found; declare with LET first",
+            operation = op,
+            targetPath = targetPath,
+            expectedKind = "declared local",
+            actualKind = "missing",
+            hint = "Declare the mutation target with LET before using SET or +=.",
+        )
+
+    private fun missingMutationPath(op: String, message: String, targetPath: String): Nothing =
+        mutationRuntimeError(
+            code = "mutation_path_missing",
+            message = message,
+            operation = op,
+            targetPath = targetPath,
+            expectedKind = "existing path segment",
+            actualKind = "missing",
+            hint = "Initialize parent containers explicitly before mutating nested paths.",
+        )
+
+    private fun mutationRuntimeError(
+        code: String,
+        message: String,
+        operation: String,
+        targetPath: String? = null,
+        expectedKind: String? = null,
+        actualKind: String? = null,
+        hint: String? = null,
+    ): Nothing {
+        throw BranchlineRuntimeDiagnosticException(
+            diagnostic = BranchlineDiagnostic(
+                code = code,
+                message = message,
+                severity = BranchlineDiagnosticSeverity.ERROR,
+                category = BranchlineDiagnosticCategory.RUNTIME,
+                payload = BranchlineDiagnosticPayload(
+                    operation = operation,
+                    targetPath = targetPath,
+                    expectedKind = expectedKind,
+                    actualKind = actualKind,
+                    hint = hint,
+                ),
+            ),
+            message = message,
+        )
+    }
+
+    private fun runtimeKind(value: Any?): String = when (value) {
+        null -> "null"
+        is Map<*, *> -> "object"
+        is List<*> -> "list"
+        is String -> "text"
+        is Boolean -> "boolean"
+        else -> if (isNumeric(value)) "number" else value::class.simpleName ?: "unknown"
     }
 
     private fun writeReplaceAt(parent: Any?, addr: LeafAddress, value: Any?): Any? {
@@ -904,19 +997,6 @@ class Exec(
         return when (addr.kind) {
             CKind.MAP -> (parent as Map<*, *>).withUpdated(addr.addr, value)
             CKind.LIST -> (parent as List<*>).withReplaced(addr.addr as Int, value)
-        }
-    }
-
-    private fun writeAppendAt(parent: Any?, addr: LeafAddress, value: Any?, initList: List<Any?>): Any? {
-        val baseList: List<Any?> = when (val current = readAt(parent, addr)) {
-            null -> initList
-            is List<*> -> current
-            else -> error("APPEND TO expects list at target path, got ${current::class.simpleName}")
-        }
-        val appended = baseList.withAppended(value)
-        return when (addr.kind) {
-            CKind.MAP -> (parent as Map<*, *>).withUpdated(addr.addr, appended)
-            CKind.LIST -> (parent as List<*>).withReplaced(addr.addr as Int, appended)
         }
     }
 
@@ -936,10 +1016,24 @@ class Exec(
     private fun PathContext.fullPath(leafAddr: LeafAddress): List<Any> =
         (frames.asSequence().map { it.keyOrIdx }.toList() + leafAddr.addr)
 
-    private fun resolveInitList(initExpr: Expr?, env: Env): List<Any?> {
-        val iv = initExpr?.let { evalExpr(it, env) } ?: emptyList<Any?>()
-        require(iv is List<*>) { "INIT for APPEND TO must evaluate to a list (got ${iv::class.simpleName})" }
-        return iv
+    private fun plusAssignValue(current: Any?, value: Any?): Any? {
+        return when {
+            current is List<*> -> current.withAppended(value)
+            current is String || value is String -> current.toString() + value.toString()
+            isNumeric(current) && isNumeric(value) -> addNum(current, value)
+            else -> mutationRuntimeError(
+                code = "mutation_plus_assign_wrong_kind",
+                message = "Operator '+=' expects a list target, numeric operands, or a string side",
+                operation = "+=",
+                expectedKind = "list, numeric, or string-compatible value",
+                actualKind = runtimeKind(current),
+                hint = "Initialize the target as [] for accumulation, 0 for numeric addition, or text for concatenation.",
+            )
+        }
+    }
+
+    private fun plusAssignTraceOp(old: Any?): String {
+        return if (old is List<*>) "APPEND" else "SET"
     }
 
     // --- MODIFY: apply applier at a static path
@@ -988,7 +1082,7 @@ class Exec(
         ensureEnvWriteAllowed("SET")
         val ctx = traverseToParent(n.target, env, opName = "SET")
         val value = evalExpr(n.value, env)
-        val addr = resolveLeafAddress(ctx.parent, ctx.last, env)
+        val addr = resolveLeafAddress(ctx.parent, ctx.last, env, opName = "SET")
         val parentUpdated = writeReplaceAt(ctx.parent, addr, value)
         val newRoot = bubbleUp(ctx.frames, parentUpdated)
         emitPathWrite("SET", ctx.rootName, ctx.fullPath(addr), readAt(ctx.parent, addr), value)
@@ -998,7 +1092,7 @@ class Exec(
     private fun handleSetVar(n: IRSetVar, env: Env) {
         ensureEnvWriteAllowed("SET")
         val scope = env.resolveScope(n.name)
-            ?: error("SET variable '${n.name}' not found; declare with LET first")
+            ?: missingMutationTarget("SET", n.name)
         val new = evalExpr(n.value, env)
         if (shouldEmitLet(n.name)) {
             val old = scope.getLocal(n.name)
@@ -1009,36 +1103,27 @@ class Exec(
         }
     }
 
-    private fun handleAppendTo(n: IRAppendTo, env: Env) {
-        ensureEnvWriteAllowed("APPEND")
-        val ctx = traverseToParent(n.target, env, opName = "APPEND TO")
-        val addr = resolveLeafAddress(ctx.parent, ctx.last, env)
+    private fun handlePlusAssign(n: IRPlusAssign, env: Env) {
+        ensureEnvWriteAllowed("+=")
+        val ctx = traverseToParent(n.target, env, opName = "+=")
+        val addr = resolveLeafAddress(ctx.parent, ctx.last, env, opName = "+=")
         val oldV = readAt(ctx.parent, addr)
         val v = evalExpr(n.value, env)
-        val init = resolveInitList(n.init, env)
-        val parentUpdated = writeAppendAt(ctx.parent, addr, v, init)
+        val newV = plusAssignValue(oldV, v)
+        val parentUpdated = writeReplaceAt(ctx.parent, addr, newV)
         val newRoot = bubbleUp(ctx.frames, parentUpdated)
         ctx.rootScope.setLocal(ctx.rootName, newRoot)
-        val newV = readAt(parentUpdated, addr)
-        emitPathWrite("APPEND", ctx.rootName, ctx.fullPath(addr), oldV, newV)
+        emitPathWrite(plusAssignTraceOp(oldV), ctx.rootName, ctx.fullPath(addr), oldV, newV)
     }
 
-    private fun handleAppendVar(n: IRAppendVar, env: Env) {
-        ensureEnvWriteAllowed("APPEND")
-        check(env.contains(n.name)) { "APPEND TO variable '${n.name}' not found; declare with LET first" }
-        val cur = env.get(n.name)
-        val base: List<Any?> = when (cur) {
-            null -> {
-                val iv = n.init?.let { evalExpr(it, env) } ?: emptyList<Any?>()
-                require(iv is List<*>) { "INIT for APPEND TO must evaluate to a list" }
-                iv
-            }
-            is List<*> -> cur
-            else -> error("APPEND TO expects list in variable '${n.name}'")
-        }
-        val appended = base.toPersistentList().add(evalExpr(n.value, env))
-        env.setExisting(n.name, appended)
-        emitPathWrite("APPEND", n.name, listOf(n.name), cur, appended)
+    private fun handlePlusAssignVar(n: IRPlusAssignVar, env: Env) {
+        ensureEnvWriteAllowed("+=")
+        val scope = env.resolveScope(n.name)
+            ?: missingMutationTarget("+=", n.name)
+        val cur = scope.getLocal(n.name)
+        val updated = plusAssignValue(cur, evalExpr(n.value, env))
+        scope.setLocal(n.name, updated)
+        emitPathWrite(plusAssignTraceOp(cur), n.name, listOf(n.name), cur, updated)
     }
 
     private fun handleModify(n: IRModify, env: Env) {
@@ -1082,13 +1167,13 @@ class Exec(
             when (n) {
                 is IRLet,
                 is IRSet,
-                is IRAppendTo,
+                is IRPlusAssign,
                 is IRModify,
                 is IROutput,
                 is IRExprOutput,
                 is IRExprStmt,
                 is IRSetVar,
-                is IRAppendVar -> Unit
+                is IRPlusAssignVar -> Unit
                 else -> return false
             }
         }
@@ -1102,13 +1187,13 @@ class Exec(
                 when (n) {
                     is IRLet -> handleLet(n, env)
                     is IRSet -> handleSet(n, env)
-                    is IRAppendTo -> handleAppendTo(n, env)
+                    is IRPlusAssign -> handlePlusAssign(n, env)
                     is IRModify -> handleModify(n, env)
                     is IROutput -> handleOutput(n, env, out)
                     is IRExprOutput -> handleExprOutput(n, env, out)
                     is IRExprStmt -> handleExprStmt(n, env)
                     is IRSetVar -> handleSetVar(n, env)
-                    is IRAppendVar -> handleAppendVar(n, env)
+                    is IRPlusAssignVar -> handlePlusAssignVar(n, env)
                     else -> error("internal error: unexpected node in fast path")
                 }
             } catch (t: Throwable) {
@@ -1216,7 +1301,7 @@ class Exec(
                 when (n) {
                     is IRLet -> handleLet(n, env)
                     is IRSet -> handleSet(n, env)
-                    is IRAppendTo -> handleAppendTo(n, env)
+                    is IRPlusAssign -> handlePlusAssign(n, env)
                     is IRModify -> handleModify(n, env)
                     is IROutput -> handleOutput(n, env, out)
                     is IRIf -> {
@@ -1239,7 +1324,7 @@ class Exec(
                     is IRExprStmt -> handleExprStmt(n, env)
                     is IRReturn -> return ExecResult(true, n.value?.let { evalExpr(it, env) })
                     is IRSetVar -> handleSetVar(n, env)
-                    is IRAppendVar -> handleAppendVar(n, env)
+                    is IRPlusAssignVar -> handlePlusAssignVar(n, env)
                 }
             } catch (t: Throwable) {
                 emitError("while executing ${n::class.simpleName}", t)

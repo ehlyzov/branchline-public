@@ -4,8 +4,16 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-02-01
+last_updated: 2026-05-05
 changelog:
+  - date: 2026-05-05
+    change: "Documented inspect JSON stable envelope and normalizedSource null behavior for Branchline DX T6."
+  - date: 2026-05-05
+    change: "Resolved array comprehension docs drift: public examples now use parser-supported [expr FOR EACH name IN collection WHERE ...] syntax."
+  - date: 2026-05-05
+    change: "Rewrote named mutation playground examples from SET x = APPEND(x, ...) to += and documented APPEND as expression-style."
+  - date: 2026-05-05
+    change: "Added public AI canonical subset/style guide page and inspect-first CLI workflow for Branchline DX T2."
   - date: 2026-02-01
     change: "Migrated from research/docs.md and added YAML front matter."
   - date: 2026-02-01
@@ -16,10 +24,10 @@ changelog:
 # Branchline documentation refresh (draft)
 
 
-## Status (as of 2026-01-31)
-- Stage: Draft content.
-- Not yet synced into `docs/` or MkDocs nav.
-- Next: move approved content into docs pages and rebuild playground assets.
+## Status (as of 2026-05-05)
+- Stage: In progress.
+- Public docs now include an AI canonical subset/style guide at `docs/language/ai-canonical-subset.md`.
+- Next: continue migrating high-impact examples and mutation guidance into canonical style.
 
 This draft lays out the revamped Branchline docs and playground experience, focusing on humans new to Branchline. It is intended to be moved into `docs/` after content is finalized and the playground embed is wired up.
 

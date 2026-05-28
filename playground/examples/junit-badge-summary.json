@@ -1,6 +1,6 @@
 {
   "title": "Summarize JUnit XML (simple)",
-  "description": "Normalize testsuite data with FILTER + FOR EACH and derive totals and badge status via SUM/MAP + CASE.",
+  "description": "Normalize testsuite data with FILTER + FOR EACH + += and derive totals and badge status via SUM/MAP + CASE.",
   "program": [
     "LET root = input.testsuites ?? input.testsuite ?? {}",
     "LET suitesRaw = root.testsuite ?? root",
@@ -12,13 +12,13 @@
     "",
     "LET normalizedSuites = []",
     "FOR EACH suite IN FILTER(suites, (item) -> item != NULL) {",
-    "    SET normalizedSuites = APPEND(normalizedSuites, {",
+    "    normalizedSuites += {",
     "        name: suite[\"@name\"] ?? suite[\"@package\"] ?? \"unnamed suite\",",
     "        tests: NUMBER(suite[\"@tests\"] ?? 0),",
     "        failures: NUMBER(suite[\"@failures\"] ?? 0),",
     "        errors: NUMBER(suite[\"@errors\"] ?? 0),",
     "        skipped: NUMBER(suite[\"@skipped\"] ?? 0)",
-    "    })",
+    "    }",
     "}",
     "",
     "LET totals = {",

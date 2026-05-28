@@ -11,20 +11,20 @@ Use a comprehension when you only need a simple mapping or filtering expression 
 
 ## Syntax
 ```branchline
-LET squares = [FOR (n IN input.numbers) => n * n];
-LET evens = [FOR (n IN input.numbers) IF n % 2 == 0 => n];
+LET squares = [n * n FOR EACH n IN input.numbers]
+LET evens = [n FOR EACH n IN input.numbers WHERE n % 2 == 0]
 ```
 
 ## Example
 ```branchline
 TRANSFORM Tags {
-    LET tags = [FOR (item IN input.items) => item.tag];
-    OUTPUT { tags: tags };
+    LET tags = [item.tag FOR EACH item IN input.items]
+    OUTPUT { tags: tags }
 }
 ```
 
 ## Pitfalls
-- Comprehensions allow only a single expression after `=>`.
+- Comprehensions allow only a single result expression before `FOR EACH`.
 - Use `FOR EACH` if you need multiple statements or side effects.
 
 ## Try it

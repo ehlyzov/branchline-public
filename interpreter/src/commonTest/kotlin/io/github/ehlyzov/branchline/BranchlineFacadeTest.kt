@@ -1,9 +1,12 @@
 package io.github.ehlyzov.branchline
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -62,6 +65,8 @@ public class BranchlineFacadeTest {
         assertTrue(unsupported.isNotEmpty())
         assertTrue(unsupported.any { it.message.contains("SHARED") })
         assertTrue(unsupported.any { it.message.contains("AWAIT") })
+        assertTrue(unsupported.all { it.category == BranchlineDiagnosticCategory.UNSUPPORTED_SUBSET })
+        assertTrue(unsupported.all { it.payload?.operation == "ai-subset-check" })
     }
 
     @Test
@@ -100,6 +105,8 @@ public class BranchlineFacadeTest {
         val diagnostic = result.diagnostics.single()
         assertEquals("parse_error", diagnostic.code)
         assertEquals(BranchlineDiagnosticSeverity.ERROR, diagnostic.severity)
+        assertEquals(BranchlineDiagnosticCategory.SYNTAX, diagnostic.category)
+        assertEquals("parse", diagnostic.payload?.operation)
         assertNotNull(diagnostic.span)
         assertTrue(diagnostic.message.isNotBlank())
     }
@@ -121,6 +128,8 @@ public class BranchlineFacadeTest {
         val diagnostic = result.diagnostics.single()
         assertEquals("semantic_error", diagnostic.code)
         assertEquals(BranchlineDiagnosticSeverity.ERROR, diagnostic.severity)
+        assertEquals(BranchlineDiagnosticCategory.SEMANTIC, diagnostic.category)
+        assertEquals("analyze", diagnostic.payload?.operation)
         assertNotNull(diagnostic.span)
         assertTrue(diagnostic.message.contains("unknownName"))
     }
@@ -193,5 +202,79 @@ public class BranchlineFacadeTest {
         val transforms = payload["transforms"]?.jsonArray
         assertNotNull(transforms)
         assertEquals(2, transforms.size)
+    }
+
+    @Test
+    public fun inspectJsonSerializesDiagnosticTaxonomyAndPayloads() {
+        val result = BranchlineInspectResult(
+            success = false,
+            transforms = emptyList(),
+            diagnostics = listOf(
+                BranchlineDiagnostic(
+                    code = "normalization_unsupported_node",
+                    message = "Cannot canonicalize node",
+                    severity = BranchlineDiagnosticSeverity.WARNING,
+                    category = BranchlineDiagnosticCategory.NORMALIZATION,
+                    payload = BranchlineDiagnosticPayload(
+                        operation = "normalize",
+                        actualKind = "OutputDecl",
+                        hint = "Keep original source.",
+                    ),
+                ),
+                BranchlineDiagnostic(
+                    code = "mutation_target_missing",
+                    message = "'+=' variable 'items' not found",
+                    severity = BranchlineDiagnosticSeverity.ERROR,
+                    category = BranchlineDiagnosticCategory.RUNTIME,
+                    payload = BranchlineDiagnosticPayload(
+                        operation = "+=",
+                        targetPath = "items",
+                        expectedKind = "declared local list, number, or string",
+                        actualKind = "missing",
+                        hint = "Declare the accumulator with LET first.",
+                    ),
+                ),
+                BranchlineDiagnostic(
+                    code = "contract_output_mismatch",
+                    message = "Output contract mismatch",
+                    severity = BranchlineDiagnosticSeverity.ERROR,
+                    category = BranchlineDiagnosticCategory.CONTRACT,
+                    payload = BranchlineDiagnosticPayload(
+                        operation = "validate-output-contract",
+                        targetPath = "root.total",
+                        expectedKind = "number",
+                        actualKind = "text",
+                        expected = buildJsonObject { put("kind", JsonPrimitive("number")) },
+                        actual = buildJsonObject { put("kind", JsonPrimitive("text")) },
+                        hint = "Convert the value with NUMBER(...) or update the contract.",
+                    ),
+                ),
+            ),
+            warnings = emptyList(),
+            featureUsage = BranchlineFeatureUsageSummary(emptyList()),
+            subsetCompatibility = BranchlineSubsetCompatibility.UNKNOWN,
+            normalizedSource = null,
+        )
+
+        val diagnostics = Json.parseToJsonElement(result.inspectJson()).jsonObject["diagnostics"]!!.jsonArray
+        val normalization = diagnostics[0].jsonObject
+        assertEquals("normalization", normalization["category"]?.jsonPrimitive?.content)
+        assertEquals("normalize", normalization["payload"]?.jsonObject?.get("operation")?.jsonPrimitive?.content)
+
+        val runtime = diagnostics[1].jsonObject
+        assertEquals("runtime", runtime["category"]?.jsonPrimitive?.content)
+        assertEquals("+=", runtime["payload"]?.jsonObject?.get("operation")?.jsonPrimitive?.content)
+        assertEquals("items", runtime["payload"]?.jsonObject?.get("targetPath")?.jsonPrimitive?.content)
+
+        val contract = diagnostics[2].jsonObject
+        assertEquals("contract", contract["category"]?.jsonPrimitive?.content)
+        assertEquals(
+            "number",
+            contract["payload"]?.jsonObject?.get("expected")?.jsonObject?.get("kind")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+            "text",
+            contract["payload"]?.jsonObject?.get("actual")?.jsonObject?.get("kind")?.jsonPrimitive?.content,
+        )
     }
 }

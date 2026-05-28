@@ -36,8 +36,6 @@ const keywords = [
   'WHERE',
   'SET',
   'APPEND',
-  'TO',
-  'INIT',
   'AS',
   'LET',
   'IN',
