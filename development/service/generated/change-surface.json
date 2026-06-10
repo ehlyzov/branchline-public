@@ -1,0 +1,28 @@
+{
+  "generated": true,
+  "generated_on": "2026-06-10",
+  "confidence": "medium",
+  "comparison_base": "HEAD",
+  "current_worktree_overlay": {
+    "changed_paths": [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "bin/audit_contour.sh",
+  "bin/bootstrap.sh",
+  "bin/promote_learning.sh",
+  "bin/prune_contour.sh",
+  "bin/refresh_contour.sh",
+  "development/docs/service-knowledge-contour-bootstrap.md",
+  "development/service/SERVICE_MAP.md",
+  "development/service/VERIFY.md",
+  "development/service/generated/change-surface.json",
+  "development/service/generated/health-report.json",
+  "development/service/generated/hotspots.md",
+  "development/service/knowledge-gaps.yaml"
+]
+  },
+  "trigger_hints": {
+    "service_map": "Update development/service/SERVICE_MAP.md for topology, entrypoint, integration-boundary, workflow, or hotspot changes.",
+    "verify": "Update development/service/VERIFY.md for build, test, lint, local-run, CI, or evidence changes."
+  }
+}
