@@ -1,5 +1,9 @@
 {
   "title": "Order shipment overview",
+  "id": "order-shipment",
+  "category": "business-transform",
+  "tags": ["orders", "shipping", "get", "format", "case", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Extract shipping operations data with GET/FORMAT and CASE-based rush classification.",
   "program": [
     "LET primaryItem = LISTIFY(input.items)[0] ?? {}",
@@ -41,5 +45,12 @@
         "quantity": 2
       }
     ]
+  },
+  "expectedOutput": {
+    "order_id": 50231,
+    "customer_email": "lea@example.com",
+    "rush_order": true,
+    "primary_sku": "tee-olivine",
+    "shipping_label": "500 Market Street, San Francisco"
   }
 }

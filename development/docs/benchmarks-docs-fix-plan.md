@@ -1,21 +1,44 @@
 ---
-status: Proposed
+status: Implemented
 depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-02-01
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Closed docs repair for benchmark readiness G7 with local docsBuild evidence and a release-asset validation caveat."
+  - date: 2026-06-10
+    change: "Completed G5 docs publication repair: release directory links, CSV co-location, shared-key collision fix, rounded reports, dispatch deploy path, and public benchmark framing."
+  - date: 2026-06-10
+    change: "Added G0 methodology handoff requirements for public benchmark pages."
+  - date: 2026-06-10
+    change: "Linked benchmark docs repair to benchmark-first readiness: public pages must show representative case categories, caveats, and downloadable CSV summaries."
   - date: 2026-02-01
     change: "Migrated from research/docs-perf.md and added YAML front matter."
 ---
 # Performance Docs + Pages Fix Plan
 
 
-## Status (as of 2026-01-31)
-- Stage: Proposed plan.
-- Broken links/assets and formatting issues are identified; fixes are split across Agent A/B/C.
-- Next: implement workflow/script changes and validate MkDocs outputs.
+## Status (as of 2026-06-10)
+- Stage: Implemented for local benchmark-readiness purposes; waiting for release-time confirmation against real GitHub release assets.
+- Agents A-E are addressed in the allowed files for G5.
+- `./gradlew docsBuild` is the required local verification for this docs plumbing pass.
+- G7 verdict allows Branchline DX T9-T18 to resume with benchmark caveats visible; public speedup/ratio claims remain blocked by benchmark credibility instrumentation, not by this docs plumbing record.
+
+## Role in benchmark-first roadmap
+
+This plan is now part of [Branchline Benchmark Readiness Plan](../planning/branchline-benchmark-readiness-plan.md). It should be executed before broader DX/adoption packaging because the current public benchmark pages still read as placeholders when release assets are absent.
+
+Additional requirements from the benchmark-first decision:
+
+- Keep benchmark pages honest about what is cross-engine JSON comparison and what is Branchline-specific measurement.
+- Show representative case categories, not only raw JMH benchmark names.
+- Keep downloadable CSV assets next to release pages.
+- Include caveats for missing external JSONata engines, expected failures, semantic non-equivalence, and VM fallback/overhead.
+- Preserve the G0 comparison contract: separate execution throughput, parse/compile, inspect/contract, and release-publication health; do not combine them into one speed claim.
+- Include minimum public row fields when benchmark data is shown: case id, workload category, product-representative flag, engine, score, error margin, allocation if available, expected-failure/unavailable reason, validation state, and notes.
+- Do not add editor/LSP claims or roadmap items to benchmark pages.
 
 ## Context snapshot (what is broken in the generated site)
 
@@ -157,3 +180,52 @@ Tasks:
 Validation:
 - Trigger `workflow_dispatch` and confirm both `build` and `deploy` run.
 
+### Agent E: Add representative benchmark summary framing
+
+Goal: Make public pages explain the benchmark portfolio rather than only listing low-level JMH names.
+
+Context:
+- `development/planning/branchline-benchmark-readiness-plan.md` defines Tier 1 cross-engine cases and Tier 2 Branchline-specific measurements.
+- Current `docs/benchmarks.md` and `docs/benchmarks/jsonata.md` pages are short and rely on generated release includes.
+
+Tasks:
+1) Add a short methodology section that separates:
+   - cross-engine JSON execution comparisons,
+   - Branchline interpreter-vs-VM comparisons,
+   - Branchline-specific inspect/contract/XML/conversion measurements.
+2) Add a case category table aligned with the readiness plan.
+3) Add caveats for missing external engine jars, expected failures, and semantic validation.
+4) Keep benchmark docs free of editor/LSP scope.
+
+Validation:
+- Run `./gradlew docsBuild`.
+
+## G5 implementation evidence (2026-06-10)
+
+Scope:
+
+- Release links now target generated HTML directory paths in the deploy workflow, local fetch helper, and public archive links.
+- JMH and JSONata CSV assets are downloaded into per-release directories so MkDocs copies them next to release pages.
+- JMH summary generation uses `--shared-key relative` for interpreter and VM `results.json` inputs, avoiding duplicate `basename` keys.
+- JMH and JSONata reports round numeric table and CSV values to three decimal places; JSONata ratios now use the same formatter.
+- Manual `workflow_dispatch` for deploy accepts an optional `ref`, checks out that ref or the current SHA, and prints dispatch context.
+- Public benchmark docs now separate cross-engine JSON execution, interpreter-vs-VM execution, Branchline-specific measurements, and publication health; representative case categories and caveats are documented without editor/LSP scope.
+
+Evidence commands:
+
+```bash
+ruby -e 'docs=["docs/benchmarks.md","docs/benchmarks/jsonata.md"].map{|p| [p, File.read(p)]}.to_h; required={"docs/benchmarks.md"=>["## Methodology", "Branchline-specific", "validation state"], "docs/benchmarks/jsonata.md"=>["Representative case categories", "missing external", "semantic validation"]}; failed=[]; required.each{|p, needles| needles.each{|n| failed << "#{p}: missing #{n}" unless docs[p].include?(n)}}; abort failed.join("\n") unless failed.empty?; puts "benchmark docs framing ok"'
+ruby -e 't=File.read(".github/scripts/jsonata-report.bl"); body=t[/FUNC formatRatio\(value\) \{(.*?)\n\}/m,1] or abort "formatRatio missing"; abort "formatRatio should use formatNumber" unless body.include?("formatNumber(value) + \"x\""); puts "jsonata ratio formatting ok"'
+./gradlew docsBuild
+```
+
+Results:
+
+- Docs framing assertion: `benchmark docs framing ok`.
+- JSONata ratio formatter assertion: `jsonata ratio formatting ok`.
+- `./gradlew docsBuild`: `BUILD SUCCESSFUL in 670ms` on the final rerun.
+
+Constraints:
+
+- `development/INDEX.md` was not updated because the G5 allowlist did not include it, even though AGENTS.md normally requires development index updates.
+- Release-time validation still requires a GitHub release with benchmark Markdown and CSV assets; the local docs build verifies the MkDocs side only.

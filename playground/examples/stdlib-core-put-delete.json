@@ -1,5 +1,9 @@
 {
   "title": "Stdlib: PUT and DELETE",
+  "id": "stdlib-core-put-delete",
+  "category": "stdlib",
+  "tags": ["put", "delete", "immutable-update", "objects", "lists", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Use PUT and DELETE to update objects and lists immutably.",
   "program": [
     "LET updatedUser = PUT(input.user, \"role\", \"reviewer\")",
@@ -27,6 +31,38 @@
       "new",
       "beta",
       "owner"
+    ]
+  },
+  "expectedOutput": {
+    "original_user": {
+      "id": 88,
+      "role": "author",
+      "legacy_id": "old-1"
+    },
+    "updated_user": {
+      "id": 88,
+      "role": "reviewer",
+      "legacy_id": "old-1"
+    },
+    "removed_field": {
+      "id": 88,
+      "role": "reviewer"
+    },
+    "original_tags": [
+      "new",
+      "beta",
+      "owner"
+    ],
+    "appended_tag": [
+      "new",
+      "beta",
+      "owner",
+      "vip"
+    ],
+    "deleted_tag": [
+      "new",
+      "owner",
+      "vip"
     ]
   }
 }

@@ -1,5 +1,9 @@
 {
   "title": "Gate deployments with CHECKPOINT and ASSERT",
+  "id": "pipeline-health-gating",
+  "category": "operations",
+  "tags": ["pipeline", "health-gate", "checkpoint", "assert", "trace", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Uses FOR EACH normalization, FILTER-based aggregates, and CASE-driven rollout gating.",
   "program": [
     "LET normalized = []",
@@ -48,6 +52,28 @@
         "name": "mobile",
         "status": "passed",
         "duration_seconds": 480
+      }
+    ]
+  },
+  "contractExpectation": {
+    "success": true,
+    "subsetCompatibility": "COMPATIBLE",
+    "transforms": [
+      {
+        "mergedContract": {
+          "output": {
+            "root": {
+              "children": {
+                "status": {
+                  "kind": "text"
+                },
+                "slow_builds": {
+                  "kind": "array"
+                }
+              }
+            }
+          }
+        }
       }
     ]
   },

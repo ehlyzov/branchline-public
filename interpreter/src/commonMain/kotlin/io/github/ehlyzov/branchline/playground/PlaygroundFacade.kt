@@ -5,6 +5,8 @@ import io.github.ehlyzov.branchline.debug.Debug
 import io.github.ehlyzov.branchline.debug.CollectingTracer
 import io.github.ehlyzov.branchline.debug.TraceOptions
 import io.github.ehlyzov.branchline.debug.TraceReport
+import io.github.ehlyzov.branchline.BranchlineFacade
+import io.github.ehlyzov.branchline.BranchlineInspectRequest
 import io.github.ehlyzov.branchline.FuncDecl
 import io.github.ehlyzov.branchline.Lexer
 import io.github.ehlyzov.branchline.ParseException
@@ -37,6 +39,9 @@ import kotlin.js.ExperimentalJsExport
 import kotlin.js.JsExport
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import io.github.ehlyzov.branchline.TypeDecl
 import io.github.ehlyzov.branchline.sema.SemanticException
 
@@ -78,6 +83,46 @@ object PlaygroundFacade {
         sharedJsonConfig: String? = null,
     ): PlaygroundResult {
         return runWithContracts(program, inputJson, enableTracing, includeContracts, "off", false, sharedJsonConfig, "json")
+    }
+
+    public fun inspect(
+        program: String,
+        sharedJsonConfig: String? = null,
+    ): PlaygroundInspectResult {
+        return try {
+            val sharedSpecs = parseSharedSpecs(sharedJsonConfig)
+            val effectiveProgram = wrapProgramIfNeeded(program, sharedSpecs)
+            val result = BranchlineFacade.inspect(
+                BranchlineInspectRequest(
+                    programText = effectiveProgram,
+                    includeNormalizedSource = true,
+                )
+            )
+            val payload = result.inspectJsonPayload()
+            PlaygroundInspectResult(
+                success = result.success,
+                normalizedSource = result.normalizedSource,
+                subsetCompatibility = result.subsetCompatibility.name,
+                diagnosticsJson = encodeInspectField(payload, "diagnostics"),
+                warningsJson = encodeInspectField(payload, "warnings"),
+                featureUsageJson = encodeInspectField(payload, "featureUsage"),
+                transformsJson = encodeInspectField(payload, "transforms"),
+                inspectJson = encodeInspectElement(payload),
+                errorMessage = if (result.success) null else result.diagnostics.firstOrNull()?.message,
+            )
+        } catch (ex: Throwable) {
+            PlaygroundInspectResult(
+                success = false,
+                normalizedSource = null,
+                subsetCompatibility = "UNKNOWN",
+                diagnosticsJson = "[]",
+                warningsJson = "[]",
+                featureUsageJson = """{"features":[]}""",
+                transformsJson = "[]",
+                inspectJson = null,
+                errorMessage = ex.message ?: ex.toString(),
+            )
+        }
     }
 
     public fun runWithContracts(
@@ -362,6 +407,12 @@ $indented
     private fun parseInput(inputJson: String): Map<String, Any?> {
         return parseJsonObjectInput(inputJson, JsonParseOptions(numberMode = JsonNumberMode.SAFE))
     }
+
+    private fun encodeInspectField(payload: JsonObject, field: String): String =
+        encodeInspectElement(payload[field] ?: JsonNull)
+
+    private fun encodeInspectElement(element: JsonElement): String =
+        sharedJson.encodeToString(JsonElement.serializer(), element)
 }
 
 @OptIn(ExperimentalJsExport::class)
@@ -378,6 +429,20 @@ public data class PlaygroundResult(
     val outputContractJson: String?,
     val contractSource: String?,
     val contractWarnings: String?,
+)
+
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+public data class PlaygroundInspectResult(
+    val success: Boolean,
+    val normalizedSource: String?,
+    val subsetCompatibility: String,
+    val diagnosticsJson: String,
+    val warningsJson: String,
+    val featureUsageJson: String,
+    val transformsJson: String,
+    val inspectJson: String?,
+    val errorMessage: String?,
 )
 
 @Serializable

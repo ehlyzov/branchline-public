@@ -1,5 +1,8 @@
 package io.github.ehlyzov.branchline.playground
 
+import io.github.ehlyzov.branchline.BranchlineFacade
+import io.github.ehlyzov.branchline.BranchlineInspectRequest
+import io.github.ehlyzov.branchline.BranchlineSubsetCompatibility
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -39,6 +42,7 @@ class PlaygroundExamplesJsTest {
 
         val files = (fs.readdirSync(examplesDir) as Array<String>).asList()
         val failures = mutableListOf<String>()
+        val descriptors = mutableListOf<PlaygroundExampleDescriptor>()
         val hostFns = StdLib.fns + mapOf("NOW" to deterministicNow)
 
         for (name in files) {
@@ -59,6 +63,47 @@ class PlaygroundExamplesJsTest {
                 } else {
                     val namePart = name.removeSuffix(".json").replace('-', '_')
                     sharedPrefix + "TRANSFORM $namePart {\n$body\n}"
+                }
+                val exampleId = name.removeSuffix(".json")
+                val descriptor = playgroundExampleDescriptor(example)
+                val metadataFailures = validateMigratedPlaygroundExampleDescriptor(exampleId, descriptor)
+                require(metadataFailures.isEmpty()) {
+                    "Metadata validation failed in $fullPath:\n${metadataFailures.joinToString("\n")}"
+                }
+                if (exampleId in MigratedPlaygroundExampleIds) {
+                    descriptors += descriptor
+                }
+                val needsInspect = descriptor.aiSubset == "compatible" ||
+                    descriptor.contractExpectation != null ||
+                    descriptor.diagnosticExpectation != null
+                if (needsInspect) {
+                    val inspectResult = BranchlineFacade.inspect(
+                        BranchlineInspectRequest(
+                            programText = program,
+                            includeNormalizedSource = true,
+                        ),
+                    )
+                    if (descriptor.aiSubset == "compatible") {
+                        assertTrue(inspectResult.success, "Inspect failed for AI-compatible example $fullPath")
+                        assertTrue(
+                            inspectResult.subsetCompatibility == BranchlineSubsetCompatibility.COMPATIBLE,
+                            "Example $fullPath is marked aiSubset=compatible but inspect returned " +
+                                "${inspectResult.subsetCompatibility}: ${inspectResult.diagnostics}",
+                        )
+                    }
+                    val inspectPayload = inspectResult.inspectJsonPayload()
+                    assertPlaygroundExpectationSubset(
+                        exampleId,
+                        "contractExpectation",
+                        descriptor.contractExpectation,
+                        inspectPayload,
+                    )
+                    assertPlaygroundExpectationSubset(
+                        exampleId,
+                        "diagnosticExpectation",
+                        descriptor.diagnosticExpectation,
+                        inspectPayload,
+                    )
                 }
                 val inputElement = example["input"] ?: JsonObject(emptyMap())
 
@@ -85,9 +130,15 @@ class PlaygroundExamplesJsTest {
                 }
                 val output = runner(seededInput)
                 assertTrue(output != null, "Example $fullPath produced null output")
+                assertExpectedPlaygroundOutput(exampleId, descriptor.expectedOutput, output)
             } catch (ex: Throwable) {
                 failures += "$fullPath -> ${ex::class.simpleName}: ${ex.message}"
             }
+        }
+        try {
+            assertMinimumPlaygroundExampleExpectations(descriptors)
+        } catch (ex: Throwable) {
+            failures += "playground expectation count -> ${ex::class.simpleName}: ${ex.message}"
         }
 
         if (failures.isNotEmpty()) {

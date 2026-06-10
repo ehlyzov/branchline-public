@@ -1,5 +1,9 @@
 {
   "title": "Summarize JUnit XML (simple)",
+  "id": "junit-badge-summary",
+  "category": "xml",
+  "tags": ["junit", "xml-shape", "aggregation", "case", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Normalize testsuite data with FILTER + FOR EACH + += and derive totals and badge status via SUM/MAP + CASE.",
   "program": [
     "LET root = input.testsuites ?? input.testsuite ?? {}",
@@ -65,5 +69,30 @@
         }
       ]
     }
+  },
+  "expectedOutput": {
+    "status": "failing",
+    "totals": {
+      "tests": 12,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 2
+    },
+    "suites": [
+      {
+        "name": "api.tests.UserTest",
+        "tests": 5,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 1
+      },
+      {
+        "name": "web.tests.CartTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      }
+    ]
   }
 }

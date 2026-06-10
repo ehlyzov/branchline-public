@@ -1,5 +1,9 @@
 {
   "title": "Hello, Transform",
+  "id": "hello-transform",
+  "category": "getting-started",
+  "tags": ["minimal", "output", "string-concat", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Minimal transform that reads input and emits a greeting.",
   "showContracts": false,
   "program": [
@@ -9,5 +13,8 @@
   ],
   "input": {
     "name": "Dana"
+  },
+  "expectedOutput": {
+    "greeting": "Hello, Dana"
   }
 }

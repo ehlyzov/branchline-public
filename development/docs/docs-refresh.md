@@ -4,8 +4,14 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-05-05
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Recorded playground Inspect workbench visual verification evidence for desktop and mobile."
+  - date: 2026-06-10
+    change: "Documented playground metadata filters and Inspect workbench as the optional visual inspect-first path."
+  - date: 2026-06-10
+    change: "Added DX quality gate expectations for docs, examples, playground assets, diagnostics, and CLI JSON work."
   - date: 2026-05-05
     change: "Documented inspect JSON stable envelope and normalizedSource null behavior for Branchline DX T6."
   - date: 2026-05-05
@@ -24,9 +30,12 @@ changelog:
 # Branchline documentation refresh (draft)
 
 
-## Status (as of 2026-05-05)
+## Status (as of 2026-06-10)
 - Stage: In progress.
 - Public docs now include an AI canonical subset/style guide at `docs/language/ai-canonical-subset.md`.
+- The playground page now surfaces category and AI subset metadata filters and presents Inspect as the optional visual path for normalized source, diagnostics, and subset blockers.
+- Desktop and mobile visual verification for the playground Inspect workbench is recorded below.
+- DX docs and example changes now use the surface-specific gate matrix in `development/ai/ai-friendly-dsl.md`, with commands kept canonical in `development/service/VERIFY.md`.
 - Next: continue migrating high-impact examples and mutation guidance into canonical style.
 
 This draft lays out the revamped Branchline docs and playground experience, focusing on humans new to Branchline. It is intended to be moved into `docs/` after content is finalized and the playground embed is wired up.
@@ -246,6 +255,44 @@ For each function we will document: signature, parameters, returns, error cases,
 - Favor JSON inputs; include at least one XML example per major section to show attribute/text handling.
 - Highlight pitfalls (nulls, type errors, out-of-bounds) near the relevant functions.
 - Cross-link guides: install → first transform → stdlib catalog → playground.
+
+---
+
+## DX quality gate checklist
+- Docs-only changes run `./gradlew docsBuild`.
+- Playground example or metadata changes run `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest`; add `./gradlew playgroundBuildAssets` when generated playground assets or bundled examples change.
+- Syntax examples or language guide changes also check the syntax row in the DX quality gate matrix, including interpreter and conformance JVM/JS tasks.
+- Diagnostics or inspect-first docs that describe machine JSON must stay aligned with CLI/facade behavior; run `./gradlew :cli:jvmTest :cli:jsNodeTest` when CLI JSON snapshots or envelope fields are affected.
+- Every docs or playground task records whether a contour trigger fired. For this docs-refresh note, the trigger is verification guidance rather than topology; the canonical command source remains `development/service/VERIFY.md`.
+
+---
+
+## Playground Inspect visual verification
+
+Verified on 2026-06-10 with a temporary local HTTP wrapper around the generated `docs/assets/playground.js` and `docs/assets/playground.css` bundle.
+
+Evidence captured under `output/playwright/`:
+
+- `t18-desktop-normalized.png` — desktop customer-profile run, compatible status, normalized source tab.
+- `t18-desktop-diagnostics.png` — desktop customer-profile diagnostics empty state.
+- `t18-desktop-blockers-empty.png` — desktop customer-profile subset blockers empty state.
+- `t18-desktop-blockers-incompatible.png` — desktop shared-memory-read run, incompatible status, subset blocker details.
+- `t18-desktop-diagnostics-incompatible.png` — desktop shared-memory-read diagnostics details.
+- `t18-mobile-incompatible-diagnostics.png` — mobile 390px layout with metadata, editors, output, and diagnostics.
+
+Observed result:
+
+- Category and AI subset filters render before the example selector.
+- Selected example metadata badges render for category, AI subset status, and tags.
+- Inspect normalized source, diagnostics, and subset blocker panes render after running examples.
+- Compatible examples show empty diagnostics/blockers states without hiding the compatibility badge.
+- Incompatible examples show blocker count and details; `shared-memory-read` reports the expected `SHARED` blocker.
+- Mobile viewport has no document-level horizontal overflow (`documentWidth=390`, `horizontalOverflow=false`).
+
+Known limitations:
+
+- The temporary wrapper returns 404 for `favicon.ico`; this is unrelated to playground rendering and does not appear in the generated docs bundle contract.
+- Mobile controls have internal select sizing wider than their visual content in DOM metrics, but they do not create page-level horizontal scroll or visible overlap.
 
 ---
 

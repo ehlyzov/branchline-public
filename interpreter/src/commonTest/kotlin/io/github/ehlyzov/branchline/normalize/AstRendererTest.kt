@@ -215,18 +215,18 @@ public class AstRendererTest {
     }
 
     @Test
-    public fun normalizationCorpusKeepsSelfAppendRewriteOutOfBaseline() {
-        val fixture = normalizationCorpusFixtures().single { it.id == "self-append-remains-set-append" }
+    public fun normalizationCorpusRewritesSafeSelfAppendToPlusAssign() {
+        val fixture = normalizationCorpusFixtures().single { it.id == "safe-self-append-rewrites-to-plus-assign" }
         val normalized = normalize(fixture.source)
         assertEquals(fixture.expected, normalized)
-        assertTrue(normalized!!.contains("SET items = APPEND(items, input.next)"))
-        assertTrue(!normalized.contains("items += input.next"))
+        assertTrue(normalized!!.contains("items += input.next"))
+        assertTrue(!normalized.contains("SET items = APPEND(items, input.next)"))
     }
 
     @Test
-    public fun unsafeSelfAppendRewritesStayDeferred() {
+    public fun unsafeSelfAppendFormsDoNotRewrite() {
         val fixtures = normalizationCorpusFixtures().filter { it.id.startsWith("unsafe-self-append-") }
-        assertEquals(3, fixtures.size)
+        assertEquals(5, fixtures.size)
 
         fixtures.forEach { fixture ->
             val normalized = normalize(fixture.source)
@@ -389,7 +389,7 @@ public class AstRendererTest {
             """,
         ),
         fixture(
-            id = "self-append-remains-set-append",
+            id = "safe-self-append-rewrites-to-plus-assign",
             source = """
                 TRANSFORM Main {
                     LET items = []
@@ -400,7 +400,7 @@ public class AstRendererTest {
             expected = """
                 TRANSFORM Main {
                     LET items = []
-                    SET items = APPEND(items, input.next)
+                    items += input.next
                     OUTPUT { items: items }
                 }
             """,
@@ -452,6 +452,46 @@ public class AstRendererTest {
                 TRANSFORM Main {
                     LET items = []
                     SET items = APPEND(input.items, input.next)
+                    OUTPUT { items: items }
+                }
+            """,
+        ),
+        fixture(
+            id = "unsafe-self-append-unknown-callee",
+            source = """
+                FUNC append(xs, item) = APPEND(xs, item)
+
+                TRANSFORM Main {
+                    LET items = []
+                    SET items = append(items, input.next)
+                    OUTPUT { items: items }
+                }
+            """,
+            expected = """
+                FUNC append(xs, item) = APPEND(xs, item)
+
+                TRANSFORM Main {
+                    LET items = []
+                    SET items = append(items, input.next)
+                    OUTPUT { items: items }
+                }
+            """,
+        ),
+        fixture(
+            id = "unsafe-self-append-different-identifier",
+            source = """
+                TRANSFORM Main {
+                    LET items = []
+                    LET other = []
+                    SET items = APPEND(other, input.next)
+                    OUTPUT { items: items }
+                }
+            """,
+            expected = """
+                TRANSFORM Main {
+                    LET items = []
+                    LET other = []
+                    SET items = APPEND(other, input.next)
                     OUTPUT { items: items }
                 }
             """,

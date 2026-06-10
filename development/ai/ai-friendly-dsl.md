@@ -4,8 +4,12 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-05-05
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Expanded the DX quality gate matrix so future syntax, normalizer, diagnostics, examples, docs, playground, and CLI JSON tasks can choose narrow verification commands aligned with VERIFY."
+  - date: 2026-06-10
+    change: "Resolved the self-append normalization gate: renderer now rewrites only simple local `SET x = APPEND(x, value)` to `x += value`; path, dynamic, unknown-callee, alias-ambiguous, and different-identifier forms stay unchanged."
   - date: 2026-05-29
     change: "Added mutation runtime diagnostic adapters for SET/+= failures with stable code/category/payload fields."
   - date: 2026-05-29
@@ -93,9 +97,9 @@ Non-goals:
 Normalization direction:
 
 - Existing renderer output should emit `+=` for explicit accumulator statements and never emit `APPEND TO`.
-- A future rewrite may transform `SET x = APPEND(x, value)` into `x += value` only when `x` is the same simple local identifier on both sides and no path/dynamic alias is involved.
-- Unsafe rewrites such as `SET obj.items = APPEND(obj.items, value)`, dynamic paths, shadowed names, or any ambiguous target should remain unchanged until a separate semantic proof exists.
-- Guard conditions are pinned by the normalization corpus: path targets, dynamic targets, and alias-ambiguous self-append patterns must remain `SET ... = APPEND(...)` until T16 explicitly accepts and implements a safe rewrite.
+- Renderer output rewrites `SET x = APPEND(x, value)` to `x += value` only when the target is a simple identifier, the value is a direct `APPEND(...)` call, and the first argument is the same simple identifier.
+- Unsafe rewrites such as `SET obj.items = APPEND(obj.items, value)`, dynamic paths, unknown or user-defined callee names, alias-ambiguous forms, or different first-argument identifiers remain `SET ... = APPEND(...)`.
+- Guard conditions are pinned by the normalization corpus: only the simple local self-append case rewrites; path targets, dynamic targets, unknown callee forms, alias-ambiguous forms, and different identifiers must not rewrite without a separate semantic proof.
 
 ## Milestone M1: Canonical Core
 Define an explicit `AI canonical subset` of Branchline for code generation and retrieval.
@@ -214,18 +218,21 @@ Make canonical style durable by moving it into docs, examples, metadata, and ver
 - Example tests that fail on invalid metadata or incorrect AI subset tags.
 - Development verification matrix aligned with `development/service/VERIFY.md`.
 
-### DX quality gate seed
-The DX quality gate matrix should start with these rows and stay aligned with `development/service/VERIFY.md`:
+### DX quality gate matrix
+The DX quality gate matrix is the surface-specific entry point for future Branchline DX tasks. It stays subordinate to `development/service/VERIFY.md`: when VERIFY changes a command, update this matrix rather than creating a parallel command source.
 
-| Touched surface | Required narrow verification |
-| --- | --- |
-| Parser, AST, or grammar | `./gradlew :interpreter:jvmTest :interpreter:jsTest :conformance-tests:jvmTest :conformance-tests:jsTest` |
-| Normalizer or AI subset | `./gradlew :interpreter:jvmTest :interpreter:jsTest` |
-| CLI inspect JSON | `./gradlew :cli:jvmTest :cli:jsNodeTest` |
-| Playground examples metadata | `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest` |
-| Public docs | `./gradlew docsBuild` |
-| Playground UI/assets | `./gradlew playgroundBuildAssets` |
-| Contour trigger | `bin/audit_contour.sh` and refresh overlays only when required |
+| Touched surface | Required narrow verification | Add when the task changes | Evidence to report |
+| --- | --- | --- | --- |
+| Syntax, parser, AST, or grammar | `./gradlew :interpreter:jvmTest :interpreter:jsTest :conformance-tests:jvmTest :conformance-tests:jsTest` | `./gradlew docsBuild` when language docs change; `./gradlew playgroundBuildAssets` when playground keywords, examples, or generated assets change | Grammar/test/docs/example sync, accepted and rejected syntax cases, JVM/JS parity |
+| Normalizer or AI subset compatibility | `./gradlew :interpreter:jvmTest :interpreter:jsTest` | `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest` when normalized playground examples or cross-runtime fixtures change | Golden normalized output, idempotence, unsupported-subset diagnostics, no unsafe rewrite |
+| Diagnostics taxonomy or payloads | `./gradlew :interpreter:jvmTest :interpreter:jsTest` | `./gradlew :cli:jvmTest :cli:jsNodeTest` when diagnostics are exposed through inspect JSON or CLI snapshots | Stable code/category/span/payload fields, repair hint behavior, JVM/JS parity |
+| CLI inspect JSON or machine envelope | `./gradlew :cli:jvmTest :cli:jsNodeTest` | `./gradlew :interpreter:jvmTest :interpreter:jsTest` when facade assembly or shared diagnostics changed | Additive envelope change or migration note, snapshot coverage, normalizedSource/null behavior |
+| Playground examples or example metadata | `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest` | `./gradlew playgroundBuildAssets` when assets or embedded example bundles change | Example id/category/tags/aiSubset validity, expected output/contract/diagnostic expectation |
+| Public docs, language guides, or docs examples | `./gradlew docsBuild` | `./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest` when docs reuse playground examples or checked snippets | Canonical style preserved, links/build pass, examples match current syntax |
+| Playground UI, worker, or generated assets | `./gradlew playgroundBuildAssets` | Local browser inspection when UI behavior changes; conformance tests when example semantics change | Asset build result, manual UI note for behavior changes, no generated asset churn unless intended |
+| Verification contract or contour docs | `bin/audit_contour.sh` | Refresh generated overlays only when the contour tooling or trigger model requires it | Contour trigger outcome, changed canonical home, unresolved gaps if any |
+
+If a DX task touches more than one surface, run the union of the relevant rows and prefer the narrow commands before `./gradlew clean build`. Use `./gradlew docsBuild` for docs-only verification and `./gradlew playgroundBuildAssets` for playground asset verification; both names are part of the current verification contract.
 
 ## Product package
 The product-level planning package for this direction lives under [development/product/branchline-dx](../product/branchline-dx/overview.md):

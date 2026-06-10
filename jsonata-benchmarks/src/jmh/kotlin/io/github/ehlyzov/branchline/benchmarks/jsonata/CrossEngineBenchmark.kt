@@ -39,11 +39,19 @@ public open class CrossEngineBenchmark {
     public fun setup() {
         val filter = resolveCaseFilter(caseId)
         val cases = filterCases(CrossEngineCases.loadAll(), filter)
-        preparedCases = cases.map { case ->
-            val inputs = buildInputs(case)
-            prepareCase(case, inputs, engineId)
-        }
         val timeoutMs = resolveBenchmarkTimeoutMs()
+        val validationDecisions = CrossEngineOutputValidator.validate(cases, timeoutMs)
+        CrossEngineStateReport.write(validationDecisions)
+        preparedCases = cases.map { case ->
+            val validationDecision = validationDecisions[OutputValidationKey(engineId, case.id)]
+            val disabledReason = validationDecision?.disabledReason
+            if (disabledReason != null) {
+                PreparedCase(case.id, engineId).apply { disable(disabledReason) }
+            } else {
+                val inputs = buildInputs(case)
+                prepareCase(case, inputs, engineId)
+            }
+        }
         timeoutRunner = if (timeoutMs == null) null else BenchmarkTimeoutRunner(timeoutMs)
     }
 
@@ -189,10 +197,6 @@ private fun prepareJsonata(
             cause,
         )
     }
-    val validationError = validateJsonataResult(case, engineId, engine, compiled, inputs)
-    if (validationError != null) {
-        return PreparedCase(case.id, engineId, validationError)
-    }
     return PreparedCase(case.id, engineId) {
         val input = if (engineId == ENGINE_DASHJOIN) inputs.dashjoinInput else inputs.ibmInput
         engine.evaluate(compiled, input)
@@ -205,30 +209,6 @@ private fun unwrapInvocationTarget(ex: Throwable): Throwable {
     } else {
         ex
     }
-}
-
-private fun validateJsonataResult(
-    case: CrossEngineCase,
-    engineId: String,
-    engine: JsonataEngine,
-    compiled: Any,
-    inputs: CrossEngineInput,
-): String? {
-    val expected = case.expectedResult ?: return null
-    val input = if (engineId == ENGINE_DASHJOIN) inputs.dashjoinInput else inputs.ibmInput
-    val actual = try {
-        engine.evaluate(compiled, input)
-    } catch (ex: Throwable) {
-        BenchmarkErrorReporter.record(engineId, case.id, "validate", ex)
-        return ex.message ?: ex::class.simpleName
-    }
-    val actualJson = toJsonElement(actual)
-    if (actualJson != expected) {
-        val message = "Unexpected result during validation."
-        BenchmarkErrorReporter.recordMessage(engineId, case.id, "validate", message)
-        return message
-    }
-    return null
 }
 
 private fun resolveCaseFilter(paramFilter: String): String {

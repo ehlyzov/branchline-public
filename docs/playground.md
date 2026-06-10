@@ -5,12 +5,12 @@ description: Try Branchline in your browser with the interactive playground.
 
 # Interactive Playground
 
-Experiment with Branchline directly in your browser—no installs required. Pick an example, edit the program and input, enable tracing, and run.
+Experiment with Branchline directly in your browser—no installs required. Pick an example, edit the program and input, enable tracing, and run. The catalog can be filtered by example category and AI subset compatibility so docs, tests, and AI-authoring examples stay discoverable from the same descriptor metadata.
 
 <link rel="stylesheet" href="../assets/playground.css">
 
 <div class="playground-embed">
-  <div class="playground-embed__intro"><strong>Tips:</strong> Cmd/Ctrl + Enter runs. Switch JSON/XML input. Toggle tracing for <code>EXPLAIN(...)</code>. Changing examples resets the editors.</div>
+  <div class="playground-embed__intro"><strong>Tips:</strong> Cmd/Ctrl + Enter runs. Switch JSON/XML input. Toggle tracing for <code>EXPLAIN(...)</code>. Use Inspect for normalized source, diagnostics, and AI subset blockers. Changing examples resets the editors.</div>
   <div class="playground-frame">
     <div class="bl-playground" data-default-example="customer-profile" role="region" aria-label="Branchline playground embed"></div>
   </div>
@@ -46,6 +46,9 @@ Experiment with Branchline directly in your browser—no installs required. Pick
 </script>
 
 ## Curated examples (all preserved)
+
+Use the category and AI subset filters in the embedded playground to narrow this list. Examples marked AI compatible are intended for inspect-first authoring loops; examples marked incompatible are still runnable language examples, but Inspect will explain why they are outside the AI canonical subset.
+
 - [collection-transforms](?example=collection-transforms){ target="_blank" } — MAP/FILTER/REDUCE style array work
 - [contract-deep-composition](?example=contract-deep-composition){ target="_blank" } — deep nested output inferred from stdlib-first composition
 - [contract-literal-brackets-static](?example=contract-literal-brackets-static){ target="_blank" } — literal bracket keys inferred as static paths
@@ -81,3 +84,8 @@ Experiment with Branchline directly in your browser—no installs required. Pick
 - Enable **Contracts** to inspect inferred input/output contracts.
 - Keep debug off for clean JSON intended for docs/tooling.
 - Enable **Contract debug** when you need `origin` and available span metadata.
+
+## Inspect workbench
+- Run an example and use **Inspect → Normalized source** to copy the canonical form for docs, agents, and repair loops.
+- Use **Diagnostics** for parser, contract, and runtime-facing messages before executing a changed program repeatedly.
+- Use **Subset blockers** when an example is runnable Branchline but not AI-canonical; blockers are driven by the same inspect compatibility result used by CLI automation.

@@ -15,6 +15,8 @@ import io.github.ehlyzov.branchline.ir.ToIR
 import io.github.ehlyzov.branchline.std.StdLib
 import io.github.ehlyzov.branchline.vm.VMFactory
 import java.lang.reflect.Method
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.nio.file.FileSystemNotFoundException
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -355,6 +357,16 @@ public object KotlinEvaluators {
         "filter_names" to ::evalFilterNames,
         "map_discount" to ::evalMapDiscount,
         "summary_stats" to ::evalSummaryStats,
+        "etl-order-normalization" to ::evalEtlOrderNormalization,
+        "large-filter-map-aggregate" to ::evalLargeFilterMapAggregate,
+        "contract-drift-projection" to ::evalContractDriftProjection,
+        "numeric-precision-invoice" to ::evalNumericPrecisionInvoice,
+        "api-envelope-shaping" to ::evalApiEnvelopeShaping,
+        "jsonata-migration-pack-01" to ::evalJsonataMigrationPack01,
+        "jsonata-migration-pack-02" to ::evalJsonataMigrationPack02,
+        "jsonata-migration-pack-03" to ::evalJsonataMigrationPack03,
+        "jsonata-migration-pack-04" to ::evalJsonataMigrationPack04,
+        "jsonata-migration-pack-05" to ::evalJsonataMigrationPack05,
         "function-sift/case004" to ::evalFunctionSiftCase004,
         "hof-map/case000" to ::evalHofMapCase000,
         "function-zip/case002" to ::evalFunctionZipCase002,
@@ -600,6 +612,238 @@ private fun evalSummaryStats(input: Any?): Any? {
     )
 }
 
+private fun evalEtlOrderNormalization(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val customer = readMap(root, "customer") ?: return null
+    val shipping = readMap(root, "shipping") ?: return null
+    val items = readItems(input)
+    var gross = 0.0
+    val lines = ArrayList<Map<String, Any?>>(items.size)
+    for (item in items) {
+        val qty = item["qty"]
+        val qtyNumber = readNumber(qty) ?: continue
+        val price = readNumber(item, "price") ?: continue
+        val lineTotal = qtyNumber * price
+        gross += lineTotal
+        lines.add(
+            linkedMapOf(
+                "sku" to readString(item, "sku"),
+                "qty" to qty,
+                "unitPrice" to price,
+                "lineTotal" to lineTotal,
+            ),
+        )
+    }
+    val discount = readNumber(root, "discount") ?: 0.0
+    return linkedMapOf(
+        "orderId" to readString(root, "order_id"),
+        "status" to (readString(root, "status") ?: "NEW"),
+        "customer" to linkedMapOf(
+            "id" to readString(customer, "customer_id"),
+            "email" to readString(customer, "email"),
+        ),
+        "shipTo" to linkedMapOf(
+            "country" to readString(shipping, "country"),
+            "postalCode" to readString(shipping, "postal"),
+        ),
+        "lines" to lines,
+        "totals" to linkedMapOf(
+            "gross" to gross,
+            "discount" to discount,
+            "net" to gross - discount,
+        ),
+    )
+}
+
+private fun evalLargeFilterMapAggregate(input: Any?): Any? {
+    val items = readItems(input)
+    val eligible = items.filter { item ->
+        readBoolean(item, "active") == true && (readNumber(item, "score") ?: 0.0) >= 80.0
+    }
+    val weighted = ArrayList<Double>(eligible.size)
+    val mapped = ArrayList<Map<String, Any?>>(eligible.size)
+    for (item in eligible) {
+        val value = (readNumber(item, "score") ?: 0.0) * (readNumber(item, "weight") ?: 0.0)
+        weighted.add(value)
+        mapped.add(
+            linkedMapOf(
+                "id" to readString(item, "id"),
+                "region" to readString(item, "region"),
+                "weighted" to value,
+            ),
+        )
+    }
+    return linkedMapOf(
+        "eligible" to mapped,
+        "summary" to linkedMapOf(
+            "count" to eligible.size,
+            "weightedTotal" to weighted.sum(),
+            "avgWeighted" to if (weighted.isEmpty()) null else weighted.sum() / weighted.size.toDouble(),
+        ),
+    )
+}
+
+private fun evalContractDriftProjection(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val accounts = readList(root, "accounts") ?: emptyList<Any?>()
+    val records = ArrayList<Map<String, Any?>>(accounts.size)
+    for (accountValue in accounts) {
+        val account = accountValue as? Map<*, *> ?: continue
+        records.add(
+            linkedMapOf(
+                "id" to readString(account, "id"),
+                "name" to (readString(account, "name") ?: readString(account, "fullName") ?: "unknown"),
+                "email" to (readString(account, "email") ?: ""),
+                "plan" to (readString(account, "plan") ?: "free"),
+                "isActive" to (readBoolean(account, "active") ?: true),
+            ),
+        )
+    }
+    return linkedMapOf("records" to records)
+}
+
+private fun evalNumericPrecisionInvoice(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val lines = readList(root, "lines") ?: emptyList<Any?>()
+    var rawSubtotal = 0.0
+    for (lineValue in lines) {
+        val line = lineValue as? Map<*, *> ?: continue
+        val quantity = readNumber(line, "quantity") ?: continue
+        val unitPrice = readNumber(line, "unitPrice") ?: continue
+        rawSubtotal += quantity * unitPrice
+    }
+    val subtotal = roundMoney(rawSubtotal)
+    val discountRate = readNumber(root, "discountRate") ?: 0.0
+    val discountAmount = roundMoney(subtotal * discountRate)
+    val shipping = readNumber(root, "shipping") ?: 0.0
+    return linkedMapOf(
+        "invoiceId" to readString(root, "invoiceId"),
+        "externalRef" to readString(root, "externalRef"),
+        "currency" to readString(root, "currency"),
+        "subtotal" to subtotal,
+        "discountAmount" to discountAmount,
+        "shipping" to shipping,
+        "total" to roundMoney(subtotal - discountAmount + shipping),
+    )
+}
+
+private fun evalApiEnvelopeShaping(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val data = readMap(root, "data") ?: return null
+    val user = readMap(data, "user") ?: return null
+    val profile = readMap(user, "profile") ?: return null
+    val emails = readList(user, "emails") ?: emptyList<Any?>()
+    val primaryEmail = emails
+        .asSequence()
+        .mapNotNull { it as? Map<*, *> }
+        .firstOrNull { readBoolean(it, "primary") == true }
+    return linkedMapOf(
+        "meta" to linkedMapOf(
+            "requestId" to readString(root, "requestId"),
+            "ok" to (readNumber(root, "status") == 200.0),
+        ),
+        "data" to linkedMapOf(
+            "userId" to readString(user, "id"),
+            "displayName" to readString(profile, "displayName"),
+            "middleName" to readString(profile, "middleName"),
+            "roles" to (readList(user, "roles") ?: emptyList<Any?>()),
+            "primaryEmail" to primaryEmail?.let { readString(it, "address") },
+        ),
+        "errors" to (readList(root, "errors") ?: emptyList<Any?>()),
+    )
+}
+
+private fun evalJsonataMigrationPack01(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val segments = readMap(root, "segments") ?: return null
+    val countries = readMap(root, "countries") ?: return null
+    val customers = readList(root, "customers") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(customers.size)
+    for (customerValue in customers) {
+        val customer = customerValue as? Map<*, *> ?: continue
+        out.add(
+            linkedMapOf(
+                "id" to readString(customer, "id"),
+                "name" to readString(customer, "name"),
+                "segment" to segments[readString(customer, "segmentCode")],
+                "country" to countries[readString(customer, "countryCode")],
+            ),
+        )
+    }
+    return linkedMapOf("customers" to out)
+}
+
+private fun evalJsonataMigrationPack02(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val contacts = readList(root, "contacts") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(contacts.size)
+    for (contactValue in contacts) {
+        val contact = contactValue as? Map<*, *> ?: continue
+        val first = readString(contact, "first")?.trim() ?: ""
+        val last = readString(contact, "last")?.trim() ?: ""
+        out.add(
+            linkedMapOf(
+                "id" to readString(contact, "id"),
+                "email" to (readString(contact, "email")?.trim()?.lowercase() ?: ""),
+                "initials" to (first.take(1) + last.take(1)).uppercase(),
+            ),
+        )
+    }
+    return linkedMapOf("contacts" to out)
+}
+
+private fun evalJsonataMigrationPack03(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val features = readList(root, "features") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(features.size)
+    for (featureValue in features) {
+        val feature = featureValue as? Map<*, *> ?: continue
+        out.add(
+            linkedMapOf(
+                "key" to readString(feature, "key"),
+                "enabled" to (readString(feature, "state") == "on"),
+                "owner" to (readString(feature, "owner") ?: "platform"),
+            ),
+        )
+    }
+    return linkedMapOf("features" to out)
+}
+
+private fun evalJsonataMigrationPack04(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val events = readList(root, "events") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(events.size)
+    for (eventValue in events) {
+        val event = eventValue as? Map<*, *> ?: continue
+        val timestamp = readString(event, "timestamp") ?: ""
+        out.add(
+            linkedMapOf(
+                "id" to readString(event, "id"),
+                "day" to timestamp.take(10),
+                "label" to "${readString(event, "type")}:${timestamp.drop(11).take(5)}",
+            ),
+        )
+    }
+    return linkedMapOf("events" to out)
+}
+
+private fun evalJsonataMigrationPack05(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val articles = readList(root, "articles") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(articles.size)
+    for (articleValue in articles) {
+        val article = articleValue as? Map<*, *> ?: continue
+        out.add(
+            linkedMapOf(
+                "id" to readString(article, "id"),
+                "title" to readString(article, "title"),
+                "tagsCsv" to (readList(article, "tags") ?: emptyList<Any?>()).joinToString(","),
+            ),
+        )
+    }
+    return linkedMapOf("articles" to out)
+}
+
 private fun evalFunctionSiftCase004(input: Any?): Any? {
     val sift = { data: Map<String, String>, predicate: (k: String, v: String, o: Map<String, String>) -> Boolean ->
         data.filter { entry ->
@@ -841,7 +1085,15 @@ private fun readNumber(value: Any?): Double? = when (value) {
     else -> null
 }
 
+private fun readBoolean(map: Map<*, *>, key: String): Boolean? {
+    return map[key] as? Boolean
+}
+
 private fun readString(map: Map<*, *>, key: String): String? {
     val value = map[key] ?: return null
     return value.toString()
+}
+
+private fun roundMoney(value: Double): Double {
+    return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_EVEN).toDouble()
 }

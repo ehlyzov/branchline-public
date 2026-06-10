@@ -1,5 +1,9 @@
 {
   "title": "Contracts: literal bracket keys",
+  "id": "contract-literal-brackets-static",
+  "category": "contracts",
+  "tags": ["literal-brackets", "static-paths", "xml-attributes", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Shows that literal bracket paths (e.g. suite[\"@name\"]) are inferred as static paths instead of opaque dynamic keys.",
   "showContracts": true,
   "program": [
@@ -15,5 +19,28 @@
       "@name": "suite-a",
       "@tests": 5
     }
+  },
+  "expectedOutput": {
+    "suite_name": "suite-a",
+    "tests": 5
+  },
+  "contractExpectation": {
+    "success": true,
+    "subsetCompatibility": "COMPATIBLE",
+    "transforms": [
+      {
+        "mergedContract": {
+          "output": {
+            "root": {
+              "children": {
+                "tests": {
+                  "kind": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
   }
 }

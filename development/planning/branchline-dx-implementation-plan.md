@@ -1,11 +1,35 @@
 ---
 status: Proposed
-depends_on: ['product/branchline-dx/overview', 'ai/ai-friendly-dsl']
+depends_on: ['product/branchline-dx/overview', 'ai/ai-friendly-dsl', 'planning/branchline-benchmark-readiness-plan']
 blocks: ['planning/branchline-dx-hardening-plan']
 supersedes: []
 superseded_by: []
-last_updated: 2026-05-05
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Closed T15: final interpreter/CLI/conformance, playground/docs, contour, front matter, and diff checks passed."
+  - date: 2026-06-10
+    change: "Closed T18: playground Inspect workbench visual verification evidence recorded for desktop and mobile."
+  - date: 2026-06-10
+    change: "Closed T12: playground catalog metadata filters and optional visual inspect-first docs are in place."
+  - date: 2026-06-10
+    change: "Closed T14 and T17: local canonical-example warnings are visible without CI policy changes, and playground inspect panes build successfully."
+  - date: 2026-06-10
+    change: "Started T14 local warning-mode validation and T17 playground inspect UI panes as parallel tasks."
+  - date: 2026-06-10
+    change: "Closed T11 and T13: playground state now receives structured inspect results with stale guards, and DX quality gates are documented."
+  - date: 2026-06-10
+    change: "Started T11 playground inspect state and T13 DX quality gate matrix as parallel non-overlapping tasks."
+  - date: 2026-06-10
+    change: "Closed T10: migrated examples now carry output, contract, and diagnostic expectations with JVM/JS checks."
+  - date: 2026-06-10
+    change: "Started T10 expected-output/contract/diagnostic expectations for migrated playground examples."
+  - date: 2026-06-10
+    change: "Closed T9 and T16: playground examples now have metadata validation for the existing first slice, and safe self-append normalization rewrites are implemented with guards."
+  - date: 2026-06-10
+    change: "Resumed T9-T18 after benchmark hardening; T9 and T16 are in progress as parallel non-overlapping agent tasks."
+  - date: 2026-06-10
+    change: "Added benchmark-first execution gate: representative benchmark readiness precedes broader DX/adoption packaging; editor/LSP stays out of scope."
   - date: 2026-05-29
     change: "Closed T8 by converting common SET/+= runtime failures into structured diagnostics and propagating them through CLI JSON errors."
   - date: 2026-05-29
@@ -32,6 +56,7 @@ changelog:
 - **Целевая модель worker-а:** Sonnet 4.6 или Codex worker, single instance, без памяти между задачами.
 - **Оркестратор:** очередь задач читается сверху вниз; worker берёт первую задачу со `Status: - [ ]`, у которой все `Depends on` уже закрыты, выполняет её, прогоняет Verify, обновляет статус и changelog в affected `development/` docs.
 - **Параллелизм:** последовательное выполнение. Задачи намеренно режут общий surface, чтобы не конфликтовать в parser/docs/examples одновременно.
+- **Benchmark-first gate:** completed on 2026-06-10 via [Branchline Benchmark Readiness Plan](branchline-benchmark-readiness-plan.md) and [Branchline Benchmark Hardening Plan](branchline-benchmark-hardening-plan.md). Broader adoption-facing T9-T18 work may resume, with public speed claims still requiring controlled benchmark runs.
 
 ## Как читать задачу
 
@@ -61,6 +86,7 @@ changelog:
 ## Известные пробелы покрытия
 
 - План не реализует LLM pipeline runtime из `development/ai/llm-pipelines.md`.
+- План не реализует editor/LSP/VS Code support; это явно исключено из ближайшего benchmark-first + DX scope.
 - План не вводит cloud/backend service for playground.
 - План не делает formal semantic verification или proof engine.
 - План не меняет release/publishing workflows кроме опциональных CI gate additions.
@@ -377,7 +403,7 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
 
 ## T9. Example metadata schema MVP
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Add retrieval-ready metadata schema to playground examples.
 - **Sources:** [S06 FR1-FR5](../product/branchline-dx/scenarios/06-example-metadata-and-retrieval.md), [S05 FR4](../product/branchline-dx/scenarios/05-canonical-docs-and-examples.md).
 - **Depends on:** T3
@@ -404,11 +430,23 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - Top 20 examples have retrieval metadata.
   - AI-compatible examples pass inspect compatibility check.
 
+### Note: implemented at `development/docs/playground-example-metadata.md:1`
+
+Added the metadata schema record, shared descriptor parser/validator, JVM/JS conformance validation, and inspect compatibility checks for examples marked `aiSubset: "compatible"`. The existing first slice migrated 17 available descriptors; the requested `xml-mapping-basic`, `json-duplicate-keys`, and `contract-coalesce-required-any-of` files do not exist under `playground/examples/`, and the schema record documents that discrepancy instead of inferring replacements.
+
+Verification:
+
+```bash
+./gradlew :conformance-tests:jvmTest --tests io.github.ehlyzov.branchline.playground.PlaygroundExamplesJvmTest :conformance-tests:jsTest --rerun-tasks
+```
+
+Result: `BUILD SUCCESSFUL`.
+
 ---
 
 ## T10. Expected output and diagnostic expectations for examples
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Make migrated examples regression-testable beyond syntax success.
 - **Sources:** [S06 FR4](../product/branchline-dx/scenarios/06-example-metadata-and-retrieval.md), [S08 FR2](../product/branchline-dx/scenarios/08-ci-quality-gates.md).
 - **Depends on:** T9
@@ -432,11 +470,23 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - At least 10 examples assert output/contract/diagnostic expectations.
   - Failed expectation points to example id and field.
 
+### Note: implemented at `conformance-tests/src/commonTest/kotlin/io/github/ehlyzov/branchline/playground/PlaygroundExampleDescriptor.kt:75`
+
+Added output, contract, and diagnostic expectation fields to the migrated example regression path. JVM and JS playground example tests now assert exact `expectedOutput` values and subset `contractExpectation`/`diagnosticExpectation` values with failure paths that include the example id and field. Current coverage is 15 examples with at least one expectation: 11 output expectations, 5 contract expectations, and 3 diagnostic expectations.
+
+Verification:
+
+```bash
+./gradlew :conformance-tests:jvmTest :conformance-tests:jsTest
+```
+
+Result: `BUILD SUCCESSFUL`; Gradle reused up-to-date outputs from the agent run.
+
 ---
 
 ## T11. Playground inspect panes MVP
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Expose inspect result from Kotlin/JS facade to playground state; do not build the full UI panes in this task.
 - **Sources:** [S07 FR1-FR5](../product/branchline-dx/scenarios/07-playground-ai-workbench.md), [S03](../product/branchline-dx/scenarios/03-inspect-first-cli.md).
 - **Depends on:** T6, T7, T9
@@ -460,14 +510,26 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   ./gradlew :interpreter:jsTest playgroundBuildAssets
   ```
 - **DoD:**
-  - Playground state can receive inspect result and reject stale result.
-  - No CLI text parsing is used.
+- Playground state can receive inspect result and reject stale result.
+- No CLI text parsing is used.
+
+### Note: implemented at `playground/src/playground-state.ts:1`
+
+Added `PlaygroundFacade.inspect(...)` over `BranchlineFacade.inspect`, worker-side structured inspect decoding, typed playground inspect state, and a monotonic `requestId` stale-result guard. The current task wires state only; final visible panes remain T17.
+
+Verification:
+
+```bash
+./gradlew :interpreter:jsTest playgroundBuildAssets
+```
+
+Result: `BUILD SUCCESSFUL`.
 
 ---
 
 ## T12. Playground metadata filters and catalog update
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Surface example metadata in playground catalog and document the playground workbench as the optional visual path for inspect-first authoring.
 - **Sources:** [S06](../product/branchline-dx/scenarios/06-example-metadata-and-retrieval.md), [S07 FR4/AC-3](../product/branchline-dx/scenarios/07-playground-ai-workbench.md).
 - **Depends on:** T9, T17
@@ -493,11 +555,24 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - Docs explain how to add a new example.
   - S07 AC-3 is covered: docs mention the playground workbench as optional visual inspect-first path.
 
+### Note: implemented at `playground/src/playground-catalog.ts:1`
+
+Added category and AI subset catalog filters, selected-example metadata badges, and a small catalog metadata test wired into the playground npm test script. Public playground and AI canonical subset docs now describe the Inspect workbench as the optional visual inspect-first path for normalized source, diagnostics, and subset blockers while keeping CLI JSON as the automation contract.
+
+Verification:
+
+```bash
+cd playground && npm run test
+./gradlew playgroundBuildAssets docsBuild
+```
+
+Result: both commands completed with `BUILD SUCCESSFUL` / exit code 0; Vite emitted only the existing large chunk warning.
+
 ---
 
 ## T13. DX quality gate matrix
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Define a surface-specific gate matrix that ties syntax/docs/examples/diagnostics/playground changes to commands.
 - **Sources:** [S08 FR1-FR5](../product/branchline-dx/scenarios/08-ci-quality-gates.md), [VERIFY](../service/VERIFY.md).
 - **Depends on:** T5, T7, T10
@@ -519,14 +594,27 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   ruby -e 't=File.read("development/ai/ai-friendly-dsl.md"); abort "missing DX quality gate" unless t.include?("DX quality gate"); abort "missing playgroundBuildAssets" unless t.include?("playgroundBuildAssets"); abort "missing docsBuild" unless t.include?("docsBuild"); puts "dx gate matrix ok"'
   ```
 - **DoD:**
-  - Every future DX task can choose a narrow command from the matrix.
-  - Contour trigger outcome is recorded.
+- Every future DX task can choose a narrow command from the matrix.
+- Contour trigger outcome is recorded.
+
+### Note: implemented at `development/ai/ai-friendly-dsl.md:221`
+
+Expanded the DX quality gate matrix for syntax/parser, normalizer/subset, diagnostics, CLI inspect JSON, playground examples/metadata, docs, playground UI/assets, and contour docs. `development/docs/docs-refresh.md` records the docs/playground checklist. The contour trigger fired for verification guidance only; `development/service/VERIFY.md` remained the canonical command source and did not need changes.
+
+Verification:
+
+```bash
+ruby -e 't=File.read("development/ai/ai-friendly-dsl.md"); abort "missing DX quality gate" unless t.include?("DX quality gate"); abort "missing playgroundBuildAssets" unless t.include?("playgroundBuildAssets"); abort "missing docsBuild" unless t.include?("docsBuild"); puts "dx gate matrix ok"'
+bin/audit_contour.sh
+```
+
+Result: both commands passed.
 
 ---
 
 ## T14. Local warnings for canonical examples
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Add local warning-mode validation for non-canonical AI-compatible examples without changing CI policy.
 - **Sources:** [S08 AC-1](../product/branchline-dx/scenarios/08-ci-quality-gates.md), [S06 AC-3](../product/branchline-dx/scenarios/06-example-metadata-and-retrieval.md).
 - **Depends on:** T9, T13
@@ -549,11 +637,23 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - Non-canonical AI-compatible examples are visible in test output.
   - CI behavior is unchanged.
 
+### Note: implemented at `conformance-tests/src/jvmTest/kotlin/io/github/ehlyzov/branchline/playground/PlaygroundExamplesJvmTest.kt:40`
+
+Added warning-mode validation for AI-compatible examples whose tested source differs from the normalized source. The Gradle JVM test task forwards deterministic `PLAYGROUND_EXAMPLE_WARNING` lines while leaving CI policy unchanged; `.github/workflows/tests.yml` was intentionally not modified.
+
+Verification:
+
+```bash
+./gradlew :conformance-tests:jvmTest --rerun-tasks
+```
+
+Result: command completed with `BUILD SUCCESSFUL` and emitted 14 current non-canonical AI-compatible example warnings.
+
 ---
 
 ## T15. Final docs/playground build and contour check
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Run final verification for all changed surfaces and update development records.
 - **Sources:** [S08](../product/branchline-dx/scenarios/08-ci-quality-gates.md), [VERIFY](../service/VERIFY.md).
 - **Depends on:** T2, T3, T4, T5, T6, T7, T10, T11, T12, T13, T16, T17, T18
@@ -582,11 +682,27 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - Unverified items are explicitly listed.
   - Development index and contour docs are in sync.
 
+### Note: implemented at `development/planning/branchline-dx-implementation-plan.md:623`
+
+Final verification ran across the changed interpreter, CLI, conformance, playground, docs, and contour surfaces. No required item remains unverified in the current T9-T18 slice.
+
+Verification:
+
+```bash
+./gradlew :interpreter:jvmTest :interpreter:jsTest :cli:jvmTest :cli:jsNodeTest :conformance-tests:jvmTest :conformance-tests:jsTest
+./gradlew playgroundBuildAssets docsBuild
+bin/audit_contour.sh
+ruby -e 'require "yaml"; Dir.glob("development/**/*.md").each { |p| t=File.read(p); next unless t.start_with?("---\n"); YAML.load(t.split(/^---$/)[1]); }; puts "development front matter ok"'
+git diff --check
+```
+
+Result: all commands passed. Gradle reused some up-to-date outputs; the broad test command still executed the changed CLI/JS/conformance tasks needed by the final gate.
+
 ---
 
 ## T16. Self-append rewrite decision and implementation gate
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Decide and execute exactly one path for self-append canonicalization: implement the safe rewrite or explicitly defer it with tests proving current behavior.
 - **Sources:** [S02 FR4](../product/branchline-dx/scenarios/02-friendly-mutation-operations.md), [T5 corpus](branchline-dx-implementation-plan.md).
 - **Depends on:** T5
@@ -609,13 +725,27 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   ```
 - **DoD:**
   - Self-append rewrite status is no longer ambiguous.
-  - Tests pin implemented or deferred behavior.
+- Tests pin implemented or deferred behavior.
+
+### Note: implemented at `interpreter/src/commonMain/kotlin/io/github/ehlyzov/branchline/normalize/AstRenderer.kt:264`
+
+Implemented the safe rewrite path: normalized output rewrites only simple local `SET x = APPEND(x, value)` to `x += value`. Unsafe forms remain pinned by tests: nested path targets, dynamic targets, alias-ambiguous first arguments, lowercase/user callee names, and different identifiers do not rewrite. `development/ai/ai-friendly-dsl.md` records the final decision.
+
+Verification:
+
+```bash
+./gradlew :interpreter:jvmTest --tests io.github.ehlyzov.branchline.normalize.AstRendererTest
+./gradlew :interpreter:jsNodeTest --tests io.github.ehlyzov.branchline.cbor.CborCodecTest.deterministicEncodingReusesNestedSetElementBytes
+./gradlew :interpreter:jvmTest :interpreter:jsTest
+```
+
+Result: all three commands completed with `BUILD SUCCESSFUL`. The CBOR command covers a portability fix in the pre-existing deterministic CBOR reuse test that otherwise blocked JS interpreter verification.
 
 ---
 
 ## T17. Playground inspect UI panes
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Build the user-visible normalized source, diagnostics and subset blocker panes using the state/facade work from T11.
 - **Sources:** [S07 AC-1](../product/branchline-dx/scenarios/07-playground-ai-workbench.md), [T11](branchline-dx-implementation-plan.md).
 - **Depends on:** T11
@@ -640,11 +770,23 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
   - User can see normalized source and diagnostics in playground.
   - UI handles compatible, incompatible and parse-error programs.
 
+### Note: implemented at `playground/src/playground.tsx:520`
+
+Added a visible Inspect workbench section with normalized source, diagnostics and subset blocker tabs, plus bounded loading, error and empty states. Execution output remains visually separate from inspect output, and responsive styles keep the panes usable on narrower viewports.
+
+Verification:
+
+```bash
+./gradlew playgroundBuildAssets
+```
+
+Result: command completed with `BUILD SUCCESSFUL`.
+
 ---
 
 ## T18. Playground visual verification
 
-- **Status:** - [ ]
+- **Status:** - [x]
 - **Goal:** Verify playground workbench rendering across desktop/mobile and record evidence.
 - **Sources:** [S07 AC-2](../product/branchline-dx/scenarios/07-playground-ai-workbench.md), [T17](branchline-dx-implementation-plan.md).
 - **Depends on:** T17
@@ -664,5 +806,17 @@ Common `SET`/`+=` mutation failures now throw `BranchlineRuntimeDiagnosticExcept
 - **DoD:**
   - Visual verification evidence is recorded.
   - Known UI limitations are documented rather than hidden.
+
+### Note: implemented at `development/docs/docs-refresh.md:264`
+
+Verified the generated playground bundle through a temporary local HTTP wrapper around `docs/assets/playground.js` and `docs/assets/playground.css`. Desktop evidence covers normalized source, diagnostics, empty blockers, and a real incompatible subset blocker. Mobile evidence covers the 390px layout with metadata, editors, output, and diagnostics.
+
+Verification:
+
+```bash
+./gradlew playgroundBuildAssets docsBuild
+```
+
+Result: command completed with `BUILD SUCCESSFUL`. Playwright screenshots were captured under `output/playwright/`; the only browser console error was the temporary wrapper's missing `favicon.ico`.
 
 ---

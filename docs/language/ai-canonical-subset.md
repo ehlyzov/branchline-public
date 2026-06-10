@@ -16,6 +16,8 @@ bl inspect program.bl --contracts --contracts-json --normalized
 
 Use the normalized source as the canonical version when it is present. If `normalizedSource` is `null`, read diagnostics and warnings first; null can mean normalization was not requested, the source used unsupported subset features, or the normalizer could not render a node safely.
 
+For a visual loop, open the playground and filter the catalog to **AI compatible** examples. Run an example, then use the Inspect workbench tabs for normalized source, diagnostics, and subset blockers. This mirrors the CLI inspect-first flow without replacing the CLI JSON contract used by automation.
+
 ## Inspect JSON envelope
 
 `bl inspect --contracts --contracts-json` returns a stable machine envelope:

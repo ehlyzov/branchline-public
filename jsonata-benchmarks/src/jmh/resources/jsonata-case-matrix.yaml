@@ -43,6 +43,317 @@ cases:
           };
       }
     kotlinEvalId: summary_stats
+  - id: etl-order-normalization
+    jsonataExpression: |
+      (
+        $gross := $sum(items.(qty * price));
+        {
+          "orderId": order_id,
+          "status": $exists(status) ? status : "NEW",
+          "customer": {
+            "id": customer.customer_id,
+            "email": customer.email
+          },
+          "shipTo": {
+            "country": shipping.country,
+            "postalCode": shipping.postal
+          },
+          "lines": $map(items, function($item) {
+            {
+              "sku": $item.sku,
+              "qty": $item.qty,
+              "unitPrice": $item.price,
+              "lineTotal": $item.qty * $item.price
+            }
+          }),
+          "totals": {
+            "gross": $gross,
+            "discount": discount,
+            "net": $gross - discount
+          }
+        }
+      )
+    inputJson: '{"order_id":"ord-1007","customer":{"customer_id":"cust-42","email":"buyer@example.com"},"shipping":{"country":"US","postal":"98101"},"discount":5.5,"items":[{"sku":"BK-001","qty":2,"price":12.5},{"sku":"PN-777","qty":1,"price":3.25},{"sku":"TB-030","qty":4,"price":2.0}]}'
+    branchlineProgram: |
+      TRANSFORM EtlOrderNormalization {
+          LET gross = SUM(MAP(input.items, (item) -> item.qty * item.price))
+          OUTPUT {
+              orderId: input.order_id,
+              status: GET(input, "status", "NEW"),
+              customer: {
+                  id: input.customer.customer_id,
+                  email: input.customer.email,
+              },
+              shipTo: {
+                  country: input.shipping.country,
+                  postalCode: input.shipping.postal,
+              },
+              lines: MAP(input.items, (item) -> {
+                  sku: item.sku,
+                  qty: item.qty,
+                  unitPrice: item.price,
+                  lineTotal: item.qty * item.price,
+              }),
+              totals: {
+                  gross: gross,
+                  discount: input.discount,
+                  net: gross - input.discount,
+              },
+          }
+      }
+    kotlinEvalId: etl-order-normalization
+  - id: large-filter-map-aggregate
+    jsonataExpression: |
+      (
+        $eligible := items[active = true and score >= 80];
+        $weighted := $eligible.(score * weight);
+        {
+          "eligible": $map($eligible, function($item) {
+            {
+              "id": $item.id,
+              "region": $item.region,
+              "weighted": $item.score * $item.weight
+            }
+          }),
+          "summary": {
+            "count": $count($eligible),
+            "weightedTotal": $sum($weighted),
+            "avgWeighted": $average($weighted)
+          }
+        }
+      )
+    inputJson: '{"items":[{"id":"a1","region":"na","active":true,"score":91,"weight":1.1},{"id":"a2","region":"eu","active":false,"score":96,"weight":0.9},{"id":"a3","region":"na","active":true,"score":77,"weight":1.4},{"id":"a4","region":"apac","active":true,"score":88,"weight":1.2},{"id":"a5","region":"eu","active":true,"score":84,"weight":0.8},{"id":"a6","region":"latam","active":true,"score":93,"weight":1.0},{"id":"a7","region":"na","active":false,"score":82,"weight":1.3},{"id":"a8","region":"apac","active":true,"score":69,"weight":1.5}]}'
+    branchlineProgram: |
+      TRANSFORM LargeFilterMapAggregate {
+          LET eligible = FILTER(input.items, (item) -> item.active == true && item.score >= 80)
+          LET weighted = MAP(eligible, (item) -> item.score * item.weight)
+          OUTPUT {
+              eligible: MAP(eligible, (item) -> {
+                  id: item.id,
+                  region: item.region,
+                  weighted: item.score * item.weight,
+              }),
+              summary: {
+                  count: COUNT(eligible),
+                  weightedTotal: SUM(weighted),
+                  avgWeighted: AVG(weighted),
+              },
+          }
+      }
+    kotlinEvalId: large-filter-map-aggregate
+  - id: contract-drift-projection
+    jsonataExpression: |
+      {
+        "records": $map(accounts, function($account) {
+          {
+            "id": $account.id,
+            "name": $exists($account.name) ? $account.name : ($exists($account.fullName) ? $account.fullName : "unknown"),
+            "email": $exists($account.email) ? $account.email : "",
+            "plan": $exists($account.plan) ? $account.plan : "free",
+            "isActive": $exists($account.active) ? $account.active : true
+          }
+        })
+      }
+    inputJson: '{"accounts":[{"id":"u-1","name":"Ada Lovelace","email":"ada@example.com","plan":"pro","active":true},{"id":"u-2","fullName":"Grace Hopper","plan":"enterprise"},{"id":"u-3","email":"linus@example.com","active":false}]}'
+    branchlineProgram: |
+      TRANSFORM ContractDriftProjection {
+          OUTPUT {
+              records: MAP(input.accounts, (account) -> {
+                  id: account.id,
+                  name: GET(account, "name", GET(account, "fullName", "unknown")),
+                  email: GET(account, "email", ""),
+                  plan: GET(account, "plan", "free"),
+                  isActive: GET(account, "active", true),
+              }),
+          }
+      }
+    kotlinEvalId: contract-drift-projection
+  - id: numeric-precision-invoice
+    jsonataExpression: |
+      (
+        $subtotal := $round($sum(lines.(quantity * unitPrice)), 2);
+        $discountAmount := $round($subtotal * discountRate, 2);
+        {
+          "invoiceId": invoiceId,
+          "externalRef": externalRef,
+          "currency": currency,
+          "subtotal": $subtotal,
+          "discountAmount": $discountAmount,
+          "shipping": shipping,
+          "total": $round($subtotal - $discountAmount + shipping, 2)
+        }
+      )
+    inputJson: '{"invoiceId":"inv-2026-0009","externalRef":"90071992547409931234","currency":"USD","discountRate":0.075,"shipping":4.99,"lines":[{"sku":"svc-basic","quantity":2,"unitPrice":19.95},{"sku":"usage","quantity":3,"unitPrice":4.2},{"sku":"support","quantity":1,"unitPrice":15.0}]}'
+    branchlineProgram: |
+      TRANSFORM NumericPrecisionInvoice {
+          LET subtotal = ROUND(SUM(MAP(input.lines, (line) -> line.quantity * line.unitPrice)), 2)
+          LET discountAmount = ROUND(subtotal * input.discountRate, 2)
+          OUTPUT {
+              invoiceId: input.invoiceId,
+              externalRef: input.externalRef,
+              currency: input.currency,
+              subtotal: subtotal,
+              discountAmount: discountAmount,
+              shipping: input.shipping,
+              total: ROUND(subtotal - discountAmount + input.shipping, 2),
+          }
+      }
+    kotlinEvalId: numeric-precision-invoice
+  - id: api-envelope-shaping
+    jsonataExpression: |
+      {
+        "meta": {
+          "requestId": requestId,
+          "ok": status = 200
+        },
+        "data": {
+          "userId": data.user.id,
+          "displayName": data.user.profile.displayName,
+          "middleName": $exists(data.user.profile.middleName) ? data.user.profile.middleName : null,
+          "roles": data.user.roles,
+          "primaryEmail": data.user.emails[primary = true][0].address
+        },
+        "errors": $exists(errors) ? errors : []
+      }
+    inputJson: '{"requestId":"req-77","status":200,"data":{"user":{"id":"usr-9","profile":{"displayName":"Nora Park"},"roles":["admin","billing"],"emails":[{"address":"nora.work@example.com","primary":false},{"address":"nora@example.com","primary":true}]}}}'
+    branchlineProgram: |
+      TRANSFORM ApiEnvelopeShaping {
+          LET user = input.data.user
+          LET profile = user.profile
+          LET primaryEmails = FILTER(user.emails, (email) -> email.primary == true)
+          OUTPUT {
+              meta: {
+                  requestId: input.requestId,
+                  ok: input.status == 200,
+              },
+              data: {
+                  userId: user.id,
+                  displayName: profile.displayName,
+                  middleName: GET(profile, "middleName", null),
+                  roles: user.roles,
+                  primaryEmail: primaryEmails[0].address,
+              },
+              errors: GET(input, "errors", []),
+          }
+      }
+    kotlinEvalId: api-envelope-shaping
+  - id: jsonata-migration-pack-01
+    jsonataExpression: |
+      {
+        "customers": $map(customers, function($customer) {
+          {
+            "id": $customer.id,
+            "name": $customer.name,
+            "segment": $lookup(segments, $customer.segmentCode),
+            "country": $lookup(countries, $customer.countryCode)
+          }
+        })
+      }
+    inputJson: '{"segments":{"A":"enterprise","B":"mid-market"},"countries":{"US":"United States","DE":"Germany"},"customers":[{"id":"c-1","name":"Acme","segmentCode":"A","countryCode":"US"},{"id":"c-2","name":"Globex","segmentCode":"B","countryCode":"DE"}]}'
+    branchlineProgram: |
+      TRANSFORM JsonataMigrationPack01 {
+          OUTPUT {
+              customers: MAP(input.customers, (customer) -> {
+                  id: customer.id,
+                  name: customer.name,
+                  segment: GET(input.segments, customer.segmentCode),
+                  country: GET(input.countries, customer.countryCode),
+              }),
+          }
+      }
+    kotlinEvalId: jsonata-migration-pack-01
+  - id: jsonata-migration-pack-02
+    jsonataExpression: |
+      {
+        "contacts": $map(contacts, function($contact) {
+          {
+            "id": $contact.id,
+            "email": $lowercase($trim($contact.email)),
+            "initials": $uppercase($substring($trim($contact.first), 0, 1) & $substring($trim($contact.last), 0, 1))
+          }
+        })
+      }
+    inputJson: '{"contacts":[{"id":"u-1","first":" Ada ","last":" Lovelace ","email":" ADA@Example.COM "},{"id":"u-2","first":" Grace","last":"Hopper ","email":"Grace.Hopper@EXAMPLE.com"}]}'
+    branchlineProgram: |
+      TRANSFORM JsonataMigrationPack02 {
+          OUTPUT {
+              contacts: MAP(input.contacts, (contact) -> {
+                  id: contact.id,
+                  email: LOWER(TRIM(contact.email)),
+                  initials: UPPER(SUBSTRING(TRIM(contact.first), 0, 1) + SUBSTRING(TRIM(contact.last), 0, 1)),
+              }),
+          }
+      }
+    kotlinEvalId: jsonata-migration-pack-02
+  - id: jsonata-migration-pack-03
+    jsonataExpression: |
+      {
+        "features": $map(features, function($feature) {
+          {
+            "key": $feature.key,
+            "enabled": $feature.state = "on",
+            "owner": $exists($feature.owner) ? $feature.owner : "platform"
+          }
+        })
+      }
+    inputJson: '{"features":[{"key":"billing.v2","state":"on","owner":"payments"},{"key":"search.beta","state":"off"},{"key":"audit.export","state":"on","owner":"compliance"}]}'
+    branchlineProgram: |
+      TRANSFORM JsonataMigrationPack03 {
+          OUTPUT {
+              features: MAP(input.features, (feature) -> {
+                  key: feature.key,
+                  enabled: feature.state == "on",
+                  owner: GET(feature, "owner", "platform"),
+              }),
+          }
+      }
+    kotlinEvalId: jsonata-migration-pack-03
+  - id: jsonata-migration-pack-04
+    jsonataExpression: |
+      {
+        "events": $map(events, function($event) {
+          {
+            "id": $event.id,
+            "day": $substring($event.timestamp, 0, 10),
+            "label": $event.type & ":" & $substring($event.timestamp, 11, 5)
+          }
+        })
+      }
+    inputJson: '{"events":[{"id":"evt-1","type":"login","timestamp":"2026-06-10T08:15:30Z"},{"id":"evt-2","type":"export","timestamp":"2026-06-10T09:45:00Z"},{"id":"evt-3","type":"logout","timestamp":"2026-06-11T17:05:10Z"}]}'
+    branchlineProgram: |
+      TRANSFORM JsonataMigrationPack04 {
+          OUTPUT {
+              events: MAP(input.events, (event) -> {
+                  id: event.id,
+                  day: SUBSTRING(event.timestamp, 0, 10),
+                  label: event.type + ":" + SUBSTRING(event.timestamp, 11, 5),
+              }),
+          }
+      }
+    kotlinEvalId: jsonata-migration-pack-04
+  - id: jsonata-migration-pack-05
+    jsonataExpression: |
+      {
+        "articles": $map(articles, function($article) {
+          {
+            "id": $article.id,
+            "title": $article.title,
+            "tagsCsv": $join($article.tags, ",")
+          }
+        })
+      }
+    inputJson: '{"articles":[{"id":"a-1","title":"Migration Notes","tags":["jsonata","branchline","mapping"]},{"id":"a-2","title":"Release Checklist","tags":["benchmarks","docs"]}]}'
+    branchlineProgram: |
+      TRANSFORM JsonataMigrationPack05 {
+          OUTPUT {
+              articles: MAP(input.articles, (article) -> {
+                  id: article.id,
+                  title: article.title,
+                  tagsCsv: JOIN(article.tags, ","),
+              }),
+          }
+      }
+    kotlinEvalId: jsonata-migration-pack-05
   - id: function-sift/case004
     branchlineProgram: |
       TRANSFORM FunctionSiftCase004 {

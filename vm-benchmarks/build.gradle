@@ -6,12 +6,13 @@ plugins {
 dependencies {
     implementation project(':vm')
     implementation project(':interpreter')
+    implementation project(':cli')
 }
 
 jmh {
     resultFormat = 'JSON'
     profilers = ['gc']
-    includes = ['io.github.ehlyzov.branchline.vm.VMTransformBenchmark.*']
+    includes = ['io.github.ehlyzov.branchline.vm.(VMTransformBenchmark|BranchlineSpecificVMBenchmark).*']
     warmupIterations = 2
     iterations = 5
     timeOnIteration = '500ms'

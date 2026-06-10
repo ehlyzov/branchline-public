@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm run test:worker-deps",
+    "prebuild": "npm run test",
     "build": "vite build",
-    "test:worker-deps": "node scripts/check-worker-deps.mjs"
+    "test": "npm run test:worker-deps && npm run test:catalog",
+    "test:worker-deps": "node scripts/check-worker-deps.mjs",
+    "test:catalog": "node scripts/test-catalog-metadata.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

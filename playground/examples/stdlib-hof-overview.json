@@ -1,5 +1,9 @@
 {
   "title": "Stdlib: Higher-order functions",
+  "id": "stdlib-hof-overview",
+  "category": "stdlib",
+  "tags": ["map", "filter", "reduce", "lambda", "higher-order", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "MAP, FILTER, REDUCE, SOME, EVERY, FIND, APPLY, IS_FUNCTION working together.",
   "program": [
     "LET doubled = MAP(input.values, (value, index, _) -> value * 2 + index)",
@@ -31,5 +35,23 @@
       3,
       4
     ]
+  },
+  "expectedOutput": {
+    "doubled": [
+      2,
+      5,
+      8,
+      11
+    ],
+    "passing": [
+      8,
+      11
+    ],
+    "reduce_total": 19,
+    "any_large": true,
+    "all_even": false,
+    "first_passing": 8,
+    "apply_increment": 5,
+    "is_function": true
   }
 }

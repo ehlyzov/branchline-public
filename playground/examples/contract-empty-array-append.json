@@ -1,5 +1,9 @@
 {
   "title": "Contracts: append from empty array",
+  "id": "contract-empty-array-append",
+  "category": "contracts",
+  "tags": ["contract-inference", "arrays", "foreach", "append", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Demonstrates stable output typing with FOR EACH filtering and += into an array seeded with [].",
   "showContracts": true,
   "program": [
@@ -24,6 +28,41 @@
       {
         "name": "web",
         "tests": 6
+      }
+    ]
+  },
+  "expectedOutput": {
+    "suites": [
+      {
+        "name": "api",
+        "tests": 4
+      },
+      {
+        "name": "web",
+        "tests": 6
+      }
+    ]
+  },
+  "contractExpectation": {
+    "success": true,
+    "subsetCompatibility": "COMPATIBLE",
+    "transforms": [
+      {
+        "mergedContract": {
+          "output": {
+            "root": {
+              "kind": "object",
+              "children": {
+                "suites": {
+                  "kind": "array",
+                  "element": {
+                    "kind": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     ]
   }

@@ -7,6 +7,8 @@ superseded_by: []
 last_updated: 2026-06-10
 changelog:
   - date: 2026-06-10
+    change: "Added G6 follow-up: old string-concat/performance regression notes need refreshed controlled baselines after benchmark row credibility is hardened."
+  - date: 2026-06-10
     change: "Started ContractValidator lookup/domain cache task for per-validation string-key views, enum sets, and compiled regex reuse."
   - date: 2026-06-10
     change: "Implemented ContractValidator lookup/domain cache with focused conformance coverage."
@@ -23,6 +25,14 @@ This file lists discrete tasks for Codex, each with context, goals, and verifica
 - Task 4 improved `range-operator/case000` but regressed `performance/case001` by ~15%; needs follow-up or rollback.
 - Task 6 added a standard JFR extraction script; no runtime change recorded.
 - Next: address the regressions (Task 3 string-concat, Task 4 performance/case001) and re-run JFR/JMH baselines.
+
+## G6 status refresh (2026-06-10)
+
+- The old Task 3 `string-concat/case000` regression note is not directly actionable from the current cross-engine benchmark row. The current Branchline analog is a constant expression and the short JMH run reports near-zero allocation with hundreds of millions of ops/s, which is not credible transformation evidence.
+- The old Task 4 `performance/case001` regression remains a risk area, but it needs a fresh controlled baseline after the benchmark harness can distinguish real execution from disabled/constant/no-op rows.
+- Required G6 run on current `main` completed successfully: `./gradlew :jsonata-benchmarks:jmh -PjmhCaseIds=performance/case001,string-concat/case000 -PjmhWarmupIterations=1 -PjmhIterations=1`.
+- Current short-run `performance/case001` rows were Kotlin 34,016.160 ops/s, Branchline interpreter 12,557.890 ops/s, and Branchline VM 5,095.741 ops/s. Treat these as smoke evidence only.
+- Do not start runtime rollback or optimization work from the old regression percentages until the benchmark cases are hardened and longer comparable baselines are captured.
 
 ## Task 1: MAP/FILTER/FLATTEN fast paths
 
@@ -143,6 +153,21 @@ Verification:
 - Add focused conformance tests covering repeated string-key lookup, numeric/stringified map keys, `ForAll` field domains, and regex domains.
 - Run the narrow conformance test before and after implementation.
 - Run `./gradlew :interpreter:jvmTest :conformance-tests:jvmTest`.
+
+## Task 8: Benchmark credibility before regression tuning
+
+Context:
+- G6 found current cross-engine rows where Branchline and external engines report near-zero allocation and implausibly high throughput for cases that should execute transformations.
+- `string-concat/case000` is constant-shaped and cannot support a regression conclusion in its current form.
+
+Goals:
+- Rewrite or reclassify constant-shaped cases before using them for interpreter regression claims.
+- Add summary/report checks that flag impossible rows and exclude them from public ratios.
+- Capture fresh longer baselines for `performance/case001`, `string-concat/case000`, `fields/case000`, `numeric-operators/case000`, and `range-operator/case000` after row credibility is fixed.
+
+Verification:
+- Run the hardened cross-engine benchmark for the affected cases with at least 5 warmup/measurement iterations.
+- Confirm each reported row has validation state, disabled/error state, allocation sanity, and VM fallback state where applicable.
 
 ## Progress
 

@@ -1,5 +1,9 @@
 {
   "title": "Contract nullable precision",
+  "id": "contract-nullable-precision",
+  "category": "contracts",
+  "tags": ["nullable", "typed-signature", "contract-json", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Demonstrate precise nullable typing in signatures with canonical contract JSON and closed explicit output records.",
   "program": [
     "TRANSFORM NullablePrecision(input: { profile: { id: string, alias?: string?, tags?: [string]? } }) -> { profile: { id: string, alias?: string?, tags?: [string]? } } {",
@@ -18,5 +22,27 @@
       "alias": null,
       "tags": ["alpha", "beta"]
     }
+  },
+  "contractExpectation": {
+    "success": true,
+    "subsetCompatibility": "COMPATIBLE",
+    "transforms": [
+      {
+        "name": "NullablePrecision",
+        "contractSource": "explicit",
+        "mergedContract": {
+          "output": {
+            "root": {
+              "kind": "object",
+              "children": {
+                "profile": {
+                  "kind": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
   }
 }

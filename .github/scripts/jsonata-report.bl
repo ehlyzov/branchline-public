@@ -1,4 +1,5 @@
 SHARED jmh MANY;
+SHARED state MANY;
 
 FUNC engineRank(engine) = CASE {
     WHEN engine == "kotlin" THEN 0
@@ -29,11 +30,27 @@ FUNC formatNumber(value) {
     RETURN STRING(ROUND(NUMBER(text), 3));
 }
 
+FUNC decimalOrNull(value) {
+    IF value == NULL THEN {
+        RETURN NULL;
+    }
+    LET text = TRIM(STRING(value));
+    IF text == "" THEN {
+        RETURN NULL;
+    }
+    LET lower = LOWER(text);
+    IF lower == "nan" || lower == "inf" || lower == "+inf" || lower == "-inf"
+        || lower == "infinity" || lower == "+infinity" || lower == "-infinity" THEN {
+        RETURN NULL;
+    }
+    RETURN DEC(text);
+}
+
 FUNC formatRatio(value) {
     IF value == NULL THEN {
         RETURN "n/a";
     }
-    RETURN STRING(value) + "x";
+    RETURN formatNumber(value) + "x";
 }
 
 FUNC formatSpeedup(value) {
@@ -43,11 +60,120 @@ FUNC formatSpeedup(value) {
     RETURN formatNumber(value) + "x";
 }
 
+FUNC csvCell(value) {
+    IF value == NULL THEN {
+        RETURN "";
+    }
+    LET text = STRING(value);
+    LET flat = REPLACE(text, "[\\r\\n]+", " ");
+    RETURN REPLACE(flat, ",", ";");
+}
+
+FUNC markdownCell(value) {
+    IF value == NULL THEN {
+        RETURN "";
+    }
+    LET text = STRING(value);
+    LET flat = REPLACE(text, "[\\r\\n]+", " ");
+    RETURN REPLACE(flat, "\\|", "\\\\|");
+}
+
 FUNC isDisplayEngine(engine) {
     RETURN engine == "branchline-interpreter"
         || engine == "branchline-vm"
         || engine == "dashjoin"
         || engine == "ibm";
+}
+
+FUNC boolText(value) {
+    IF value == TRUE THEN {
+        RETURN "true";
+    }
+    RETURN "false";
+}
+
+FUNC isComparableValue(value) {
+    IF value == TRUE THEN {
+        RETURN TRUE;
+    }
+    LET text = LOWER(TRIM(STRING(value)));
+    RETURN text == "true";
+}
+
+FUNC stateCaseId(row) {
+    RETURN GET(row, "case", row.caseId ?? "");
+}
+
+FUNC findState(stateRows, engine, caseId) {
+    FOR row IN stateRows {
+        IF row.engine == engine && stateCaseId(row) == caseId THEN {
+            RETURN row;
+        }
+    }
+    RETURN NULL;
+}
+
+FUNC normalizeState(stateRow) {
+    IF stateRow == NULL THEN {
+        RETURN {
+            validationState: "missing_state",
+            comparable: FALSE,
+            phase: "report",
+            reason: "No state-report.json row for engine/case",
+            notes: ""
+        };
+    }
+    RETURN {
+        validationState: stateRow.validation_state ?? "unknown",
+        comparable: isComparableValue(stateRow.comparable ?? FALSE),
+        phase: stateRow.phase ?? "",
+        reason: stateRow.reason ?? "",
+        notes: stateRow.notes ?? ""
+    };
+}
+
+FUNC resolveAllocBytes(entry) {
+    LET secondary = entry.secondaryMetrics ?? {};
+    LET allocKey = NULL;
+    FOR key IN KEYS(secondary) {
+        IF CONTAINS(STRING(key), "gc.alloc.rate.norm") THEN {
+            SET allocKey = key;
+        }
+    }
+    IF allocKey == NULL THEN {
+        RETURN NULL;
+    }
+    LET metric = GET(secondary, allocKey, NULL);
+    IF metric == NULL THEN {
+        RETURN NULL;
+    }
+    LET raw = NUMBER(metric.score);
+    IF raw == NULL THEN {
+        RETURN NULL;
+    }
+    IF raw < 0 THEN {
+        RETURN DEC(0);
+    }
+    RETURN DEC(raw);
+}
+
+FUNC credibilityFlag(row) {
+    LET rawScore = NUMBER(row.score);
+    IF rawScore == NULL THEN {
+        RETURN "";
+    }
+    LET score = DEC(rawScore);
+    IF row.allocBytes != NULL && row.allocBytes <= DEC(16) && score >= DEC(10000000) THEN {
+        RETURN "implausible_high_score_near_zero_alloc";
+    }
+    IF row.allocBytes == NULL && score >= DEC(100000000) THEN {
+        RETURN "implausible_high_score_no_alloc_metric";
+    }
+    RETURN "";
+}
+
+FUNC isEligibleSpeedupRow(row) {
+    RETURN row.comparable == TRUE && row.credibilityFlag == "";
 }
 
 FUNC buildSortKey(row, idx) {
@@ -77,6 +203,15 @@ FUNC sortRows(rows) {
 FUNC findScore(rows, caseId, engineId) {
     FOR row IN rows {
         IF row.caseId == caseId && row.engine == engineId THEN {
+            RETURN row.score;
+        }
+    }
+    RETURN NULL;
+}
+
+FUNC findEligibleScore(rows, caseId, engineId) {
+    FOR row IN rows {
+        IF row.caseId == caseId && row.engine == engineId && isEligibleSpeedupRow(row) THEN {
             RETURN row.score;
         }
     }
@@ -136,7 +271,7 @@ FUNC medianValue(values) {
 FUNC collectScores(rows, caseIds, engineId) {
     LET scores = [];
     FOR caseId IN caseIds {
-        LET score = findScore(rows, caseId, engineId);
+        LET score = findEligibleScore(rows, caseId, engineId);
         IF score != NULL THEN {
             SET scores = APPEND(scores, score);
         }
@@ -154,7 +289,7 @@ FUNC filterDashjoinAnomalies(rows, caseIds) {
     LET included = [];
     LET excluded = [];
     FOR caseId IN caseIds {
-        LET score = findScore(rows, caseId, "dashjoin");
+        LET score = findEligibleScore(rows, caseId, "dashjoin");
         IF score == NULL THEN {
             SET excluded = APPEND(excluded, caseId);
         } ELSE {
@@ -172,8 +307,8 @@ FUNC collectSpeedups(rows, caseIds, branchEngine, jsonataEngine) {
     LET fasterRatios = [];
     LET total = 0;
     FOR caseId IN caseIds {
-        LET branchScore = findScore(rows, caseId, branchEngine);
-        LET jsonataScore = findScore(rows, caseId, jsonataEngine);
+        LET branchScore = findEligibleScore(rows, caseId, branchEngine);
+        LET jsonataScore = findEligibleScore(rows, caseId, jsonataEngine);
         IF branchScore != NULL && jsonataScore != NULL THEN {
             SET total = total + 1;
             LET ratio = branchScore / jsonataScore;
@@ -203,7 +338,7 @@ FUNC buildSpeedupSummary(rows, caseIds) {
     LET lines = [];
     SET lines = APPEND(lines, "### Branchline speedup summary");
     SET lines = APPEND(lines, "");
-    SET lines = APPEND(lines, "Counts include cases where both engines have scores. Speedup is Branchline ops/s divided by Dashjoin ops/s.");
+    SET lines = APPEND(lines, "Counts include cases where both engines have scores, comparable state, and no credibility flag. Speedup is Branchline ops/s divided by Dashjoin ops/s.");
     SET lines = APPEND(lines, "");
     SET lines = APPEND(lines, "| Comparison | Faster cases | Total cases | Avg speedup (faster cases) | Max speedup |");
     SET lines = APPEND(lines, "| --- | ---: | ---: | ---: | ---: |");
@@ -226,7 +361,7 @@ FUNC buildSpeedupSummary(rows, caseIds) {
     RETURN JOIN(lines, "\n");
 }
 
-FUNC buildMarkdown(rows) {
+FUNC buildMarkdown(rows, stateRowCount) {
     LET display = [];
     FOR row IN rows {
         IF isDisplayEngine(row.engine) THEN {
@@ -245,6 +380,11 @@ FUNC buildMarkdown(rows) {
     SET lines = APPEND(lines, "Source data: [CSV](jsonata-summary.csv).");
     SET lines = APPEND(lines, "");
     SET lines = APPEND(lines, "Scores are throughput in ops/s (higher is faster). Ratios compare Branchline throughput to the fastest JSONata engine.");
+    SET lines = APPEND(lines, "Rows require comparable state and no credibility flag before they count toward speedup summaries.");
+    IF stateRowCount == 0 THEN {
+        SET lines = APPEND(lines, "");
+        SET lines = APPEND(lines, "State report warning: no state rows were provided, so no rows are treated as comparable.");
+    }
     SET lines = APPEND(lines, "");
     LET dashjoinFilter = filterDashjoinAnomalies(display, caseIds);
     LET filteredCaseIds = dashjoinFilter.included;
@@ -260,10 +400,10 @@ FUNC buildMarkdown(rows) {
     SET lines = APPEND(lines, "| Case | Branchline Interpreter (ops/s) | Branchline VM (ops/s) | Fastest JSONata (ops/s) | Fastest JSONata engine | Interpreter vs JSONata | VM vs JSONata |");
     SET lines = APPEND(lines, "| --- | ---: | ---: | ---: | --- | ---: | ---: |");
     FOR caseId IN filteredCaseIds {
-        LET interp = findScore(display, caseId, "branchline-interpreter");
-        LET vm = findScore(display, caseId, "branchline-vm");
-        LET dashjoin = findScore(display, caseId, "dashjoin");
-        LET ibm = findScore(display, caseId, "ibm");
+        LET interp = findEligibleScore(display, caseId, "branchline-interpreter");
+        LET vm = findEligibleScore(display, caseId, "branchline-vm");
+        LET dashjoin = findEligibleScore(display, caseId, "dashjoin");
+        LET ibm = findEligibleScore(display, caseId, "ibm");
         LET fastest = resolveFastestJsonata(ibm, dashjoin);
         LET fastestEngine = CASE {
             WHEN fastest.engine == NULL THEN "n/a"
@@ -287,13 +427,48 @@ FUNC buildMarkdown(rows) {
             + " |";
         SET lines = APPEND(lines, line);
     }
+    SET lines = APPEND(lines, "");
+    SET lines = APPEND(lines, "### Row state");
+    SET lines = APPEND(lines, "| Engine | Case | Score (ops/s) | Allocation (B/op) | Validation state | Comparable | Credibility flag | Reason |");
+    SET lines = APPEND(lines, "| --- | --- | ---: | ---: | --- | --- | --- | --- |");
+    FOR row IN display {
+        LET flag = CASE {
+            WHEN row.credibilityFlag == "" THEN "ok"
+            ELSE row.credibilityFlag
+        };
+        LET reason = CASE {
+            WHEN row.reason == "" THEN "n/a"
+            ELSE row.reason
+        };
+        LET line = "| " + markdownCell(row.engine)
+            + " | " + markdownCell(row.caseId)
+            + " | " + formatNumber(row.score)
+            + " | " + formatNumber(row.allocBytes)
+            + " | " + markdownCell(row.validationState)
+            + " | " + boolText(row.comparable)
+            + " | " + markdownCell(flag)
+            + " | " + markdownCell(reason)
+            + " |";
+        SET lines = APPEND(lines, line);
+    }
     RETURN JOIN(lines, "\n");
 }
 
 FUNC buildCsv(rows) {
-    LET lines = ["engine,case,score,score_error,unit"];
+    LET lines = ["engine,case,score,score_error,unit,alloc_b_op,validation_state,comparable,phase,reason,notes,credibility_flag"];
     FOR row IN rows {
-        LET line = row.engine + "," + row.caseId + "," + formatNumber(row.score) + "," + formatNumber(row.scoreError) + "," + row.unit;
+        LET line = csvCell(row.engine)
+            + "," + csvCell(row.caseId)
+            + "," + formatNumber(row.score)
+            + "," + formatNumber(row.scoreError)
+            + "," + csvCell(row.unit)
+            + "," + formatNumber(row.allocBytes)
+            + "," + csvCell(row.validationState)
+            + "," + boolText(row.comparable)
+            + "," + csvCell(row.phase)
+            + "," + csvCell(row.reason)
+            + "," + csvCell(row.notes)
+            + "," + csvCell(row.credibilityFlag);
         SET lines = APPEND(lines, line);
     }
     RETURN JOIN(lines, "\n");
@@ -305,6 +480,11 @@ TRANSFORM JsonataReport {
         SET raw = APPEND(raw, LISTIFY(AWAIT_SHARED("jmh", key)));
     }
     LET entries = FLATTEN(raw);
+    LET stateRaw = [];
+    FOR key IN KEYS(state) {
+        SET stateRaw = APPEND(stateRaw, LISTIFY(AWAIT_SHARED("state", key)));
+    }
+    LET stateRows = FLATTEN(stateRaw);
     LET rows = [];
     FOR entry IN entries {
         LET params = entry.params ?? {};
@@ -312,17 +492,38 @@ TRANSFORM JsonataReport {
         IF engine != NULL THEN {
             LET caseId = params.caseId ?? "";
             LET primary = entry.primaryMetric ?? {};
-            SET rows = APPEND(rows, {
+            LET stateInfo = normalizeState(findState(stateRows, engine, caseId));
+            LET row = {
                 engine: engine,
                 caseId: caseId,
-                score: primary.score,
-                scoreError: primary.scoreError,
-                unit: primary.scoreUnit ?? ""
+                score: decimalOrNull(primary.score),
+                scoreError: decimalOrNull(primary.scoreError),
+                unit: primary.scoreUnit ?? "",
+                allocBytes: resolveAllocBytes(entry),
+                validationState: stateInfo.validationState,
+                comparable: stateInfo.comparable,
+                phase: stateInfo.phase,
+                reason: stateInfo.reason,
+                notes: stateInfo.notes
+            };
+            SET rows = APPEND(rows, {
+                engine: row.engine,
+                caseId: row.caseId,
+                score: row.score,
+                scoreError: row.scoreError,
+                unit: row.unit,
+                allocBytes: row.allocBytes,
+                validationState: row.validationState,
+                comparable: row.comparable,
+                phase: row.phase,
+                reason: row.reason,
+                notes: row.notes,
+                credibilityFlag: credibilityFlag(row)
             });
         }
     }
     LET sorted = sortRows(rows);
-    LET markdown = buildMarkdown(sorted);
+    LET markdown = buildMarkdown(sorted, LENGTH(stateRows));
     LET csv = buildCsv(sorted);
 
     OUTPUT {

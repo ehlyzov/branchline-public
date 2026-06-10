@@ -4,17 +4,10 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 import java.time.Instant
 
-private val ERROR_REPORT_PATH: Path = Paths.get(
-    "jsonata-benchmarks",
-    "build",
-    "reports",
-    "jsonata-benchmarks",
-    "error-report.log",
-)
+private val ERROR_REPORT_PATH: Path = resolveJsonataBenchmarkReportDir().resolve("error-report.log")
 
 public object BenchmarkErrorReporter {
     private val lock = Any()

@@ -8,9 +8,11 @@ type SharedStorageSpec = {
 };
 
 type WorkerRequest = {
+  requestId: number;
   code: string;
   input: string;
   trace: boolean;
+  inspect: boolean;
   inputFormat: InputFormat;
   outputFormat: OutputFormat;
   includeContracts: boolean;
@@ -20,6 +22,7 @@ type WorkerRequest = {
 };
 
 type WorkerResponse = {
+  requestId: number;
   success: boolean;
   outputJson: string | null;
   errorMessage: string | null;
@@ -31,8 +34,15 @@ type WorkerResponse = {
   outputContractJson: string | null;
   contractSource: string | null;
   contractWarnings: string | null;
+  inspectResult: PlaygroundInspectPayload | null;
+  inspectError: string | null;
 };
 
+import type {
+  PlaygroundDiagnostic,
+  PlaygroundInspectPayload,
+  PlaygroundSubsetCompatibility
+} from './playground-state';
 import kotlinStdlibUrl from '../../interpreter/build/dist/js/productionLibrary/kotlin-kotlin-stdlib.js?url';
 import immutableCollectionsUrl from '../../interpreter/build/dist/js/productionLibrary/Kotlin-Immutable-Collections-kotlinx-collections-immutable.js?url';
 import atomicfuUrl from '../../interpreter/build/dist/js/productionLibrary/kotlinx-atomicfu.js?url';
@@ -44,6 +54,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 type PlaygroundFacade = {
   run(program: string, inputJson: string, enableTracing: boolean, includeContracts: boolean): WorkerResponse;
+  inspect?(program: string, sharedJsonConfig: string | null): RawPlaygroundInspectResult;
   runWithShared?(
     program: string,
     inputJson: string,
@@ -61,6 +72,18 @@ type PlaygroundFacade = {
     sharedJsonConfig: string | null,
     outputFormat: OutputFormat
   ): WorkerResponse;
+};
+
+type RawPlaygroundInspectResult = {
+  success: boolean;
+  normalizedSource: string | null;
+  subsetCompatibility: string;
+  diagnosticsJson: string;
+  warningsJson: string;
+  featureUsageJson: string;
+  transformsJson: string;
+  inspectJson: string | null;
+  errorMessage: string | null;
 };
 
 const INTERPRETER_GLOBAL = 'io.github.ehlyzov.branchline:interpreter';
@@ -137,9 +160,11 @@ function loadFacade(): Promise<PlaygroundFacade> {
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const {
+    requestId,
     code,
     input,
     trace,
+    inspect,
     inputFormat,
     outputFormat = 'json',
     includeContracts,
@@ -149,20 +174,35 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   } = event.data;
   const sharedOffset = shared.length ? shared.length + 1 : 0;
   const wrapperAdjustment = computeWrapperAdjustment(code, sharedOffset);
+  let inspectResult: PlaygroundInspectPayload | null = null;
+  let inspectError: string | null = null;
   try {
     const runner = await loadFacade();
-    const payload = prepareInput(input, inputFormat);
     const sharedJson = shared.length ? JSON.stringify(shared) : null;
+    if (inspect) {
+      try {
+        inspectResult = runInspect(runner, code, sharedJson, wrapperAdjustment);
+      } catch (error) {
+        inspectError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    const payload = prepareInput(input, inputFormat);
     const result = runner.runWithContracts
       ? runner.runWithContracts(code, payload, trace, includeContracts, contractsMode, contractsDebug, sharedJson, outputFormat)
       : runner.runWithShared
         ? runner.runWithShared(code, payload, trace, includeContracts, sharedJson)
         : runner.run(code, payload, trace, includeContracts);
-    const adjusted = adjustResultForWrapper(result, wrapperAdjustment);
+    const adjusted: WorkerResponse = {
+      ...adjustResultForWrapper(result, wrapperAdjustment),
+      requestId,
+      inspectResult,
+      inspectError
+    };
     self.postMessage(adjusted satisfies WorkerResponse);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const fallback: WorkerResponse = {
+      requestId,
       success: false,
       outputJson: null,
       errorMessage: message,
@@ -173,13 +213,73 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       inputContractJson: null,
       outputContractJson: null,
       contractSource: null,
-      contractWarnings: null
+      contractWarnings: null,
+      inspectResult,
+      inspectError
     };
     self.postMessage(fallback);
   }
 };
 
 export {};
+
+function runInspect(
+  runner: PlaygroundFacade,
+  code: string,
+  sharedJson: string | null,
+  wrapperAdjustment: WrapperAdjustment | null
+): PlaygroundInspectPayload {
+  if (typeof runner.inspect !== 'function') {
+    throw new Error('Branchline playground facade does not expose inspect.');
+  }
+
+  const raw = runner.inspect(code, sharedJson);
+  return adjustInspectForWrapper(decodeInspectResult(raw), wrapperAdjustment);
+}
+
+function decodeInspectResult(raw: RawPlaygroundInspectResult): PlaygroundInspectPayload {
+  return {
+    success: raw.success,
+    normalizedSource: raw.normalizedSource ?? null,
+    subsetCompatibility: normalizeSubsetCompatibility(raw.subsetCompatibility),
+    diagnostics: parseJsonArray<PlaygroundDiagnostic>(raw.diagnosticsJson),
+    warnings: parseJsonArray<PlaygroundDiagnostic>(raw.warningsJson),
+    featureUsage: parseFeatureUsage(raw.featureUsageJson),
+    transforms: parseJsonArray<unknown>(raw.transformsJson),
+    rawJson: raw.inspectJson
+  };
+}
+
+function normalizeSubsetCompatibility(value: string): PlaygroundSubsetCompatibility {
+  if (value === 'COMPATIBLE' || value === 'INCOMPATIBLE' || value === 'UNKNOWN') {
+    return value;
+  }
+  return 'UNKNOWN';
+}
+
+function parseFeatureUsage(raw: string): { features: string[] } {
+  const value = parseJsonValue(raw);
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return { features: [] };
+  }
+  const features = (value as { features?: unknown }).features;
+  return {
+    features: Array.isArray(features) ? features.filter((item): item is string => typeof item === 'string') : []
+  };
+}
+
+function parseJsonArray<T>(raw: string): T[] {
+  const value = parseJsonValue(raw);
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function parseJsonValue(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (_error) {
+    return null;
+  }
+}
 
 const xmlParser = new XMLParser({
   preserveOrder: true,
@@ -454,5 +554,75 @@ function adjustResultForWrapper(
     ...result,
     line,
     column
+  };
+}
+
+function adjustInspectForWrapper(
+  result: PlaygroundInspectPayload,
+  adjustment: WrapperAdjustment | null
+): PlaygroundInspectPayload {
+  if (!adjustment) {
+    return result;
+  }
+
+  return {
+    ...result,
+    diagnostics: result.diagnostics.map((diagnostic) => adjustDiagnosticForWrapper(diagnostic, adjustment)),
+    warnings: result.warnings.map((diagnostic) => adjustDiagnosticForWrapper(diagnostic, adjustment))
+  };
+}
+
+function adjustDiagnosticForWrapper(
+  diagnostic: PlaygroundDiagnostic,
+  adjustment: WrapperAdjustment
+): PlaygroundDiagnostic {
+  if (diagnostic.span == null) {
+    return diagnostic;
+  }
+
+  const start = adjustPositionForWrapper(
+    diagnostic.span.startLine,
+    diagnostic.span.startColumn,
+    adjustment
+  );
+  const end = adjustPositionForWrapper(
+    diagnostic.span.endLine,
+    diagnostic.span.endColumn,
+    adjustment
+  );
+
+  return {
+    ...diagnostic,
+    span: {
+      startLine: start.line,
+      startColumn: start.column,
+      endLine: end.line,
+      endColumn: end.column
+    }
+  };
+}
+
+function adjustPositionForWrapper(
+  rawLine: number,
+  rawColumn: number,
+  adjustment: WrapperAdjustment
+): { line: number; column: number } {
+  const relativeLine = rawLine - adjustment.lineOffset;
+  if (relativeLine < 1) {
+    return { line: rawLine, column: rawColumn };
+  }
+
+  const trimmedIndex = relativeLine - 1;
+  if (trimmedIndex >= 0 && trimmedIndex < adjustment.lineMap.length) {
+    const line = adjustment.lineMap[trimmedIndex];
+    const column = adjustment.indentedLines[trimmedIndex]
+      ? Math.max(1, rawColumn - 4)
+      : rawColumn;
+    return { line, column };
+  }
+
+  return {
+    line: Math.min(adjustment.originalLineCount, adjustment.lastContentLine),
+    column: rawColumn
   };
 }

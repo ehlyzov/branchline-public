@@ -2,6 +2,27 @@ import React from 'react';
 import './monaco-environment';
 import * as monaco from 'monaco-editor';
 import { BRANCHLINE_LANGUAGE_ID, ensureBranchlineLanguage } from './branchline-language';
+import {
+  CATALOG_AI_SUBSET_OPTIONS,
+  catalogAiSubsetLabel,
+  catalogAiSubsetValue,
+  catalogCategoryLabel,
+  catalogCategoryOptions,
+  catalogCategoryValue,
+  filterCatalogExamples,
+  visibleCatalogTags,
+  type CatalogAiSubset,
+  type CatalogAiSubsetFilter,
+  type CatalogCategoryFilter
+} from './playground-catalog';
+import {
+  cancelInspectRequest,
+  createInitialPlaygroundState,
+  receiveInspectResult,
+  startInspectRequest,
+  type PlaygroundDiagnostic,
+  type PlaygroundInspectPayload
+} from './playground-state';
 import './playground.css';
 
 const DEFAULT_PROGRAM = `LET fullName = msg.first_name + " " + msg.last_name;
@@ -32,6 +53,10 @@ type OutputFormat = 'json' | 'json-compact' | 'json-canonical' | 'xml' | 'xml-co
 
 type RawExample = {
   title: string;
+  id?: string;
+  category?: string;
+  tags?: string[];
+  aiSubset?: string;
   description?: string;
   program: string | string[];
   input: unknown;
@@ -49,6 +74,9 @@ type ExampleModule = {
 type PlaygroundExample = {
   id: string;
   title: string;
+  category?: string;
+  tags: string[];
+  aiSubset: CatalogAiSubset;
   description?: string;
   program: string;
   input: string;
@@ -83,6 +111,9 @@ function normalizeExample(id: string, raw: RawExample): PlaygroundExample {
   return {
     id,
     title: raw.title,
+    category: raw.category,
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+    aiSubset: catalogAiSubsetValue(raw.aiSubset),
     description: raw.description,
     program,
     input: input || DEFAULT_INPUT,
@@ -95,6 +126,7 @@ function normalizeExample(id: string, raw: RawExample): PlaygroundExample {
 }
 
 type WorkerResult = {
+  requestId: number;
   success: boolean;
   outputJson: string | null;
   errorMessage: string | null;
@@ -106,11 +138,26 @@ type WorkerResult = {
   outputContractJson: string | null;
   contractSource: string | null;
   contractWarnings: string | null;
+  inspectResult: PlaygroundInspectPayload | null;
+  inspectError: string | null;
 };
 
 type BranchlinePlaygroundProps = {
   defaultExampleId?: string;
 };
+
+type InspectTab = 'normalized' | 'diagnostics' | 'blockers';
+
+type InspectTabDefinition = {
+  id: InspectTab;
+  label: string;
+};
+
+const INSPECT_TABS: InspectTabDefinition[] = [
+  { id: 'normalized', label: 'Normalized source' },
+  { id: 'diagnostics', label: 'Diagnostics' },
+  { id: 'blockers', label: 'Subset blockers' }
+];
 
 function readExampleFromLocation(): string | null {
   if (typeof window === 'undefined') {
@@ -143,6 +190,67 @@ function buildHostedPlaygroundUrl(exampleId: string): string {
   return `${PLAYGROUND_HOSTED_URL}?example=${encodeURIComponent(exampleId)}`;
 }
 
+function isSubsetBlocker(diagnostic: PlaygroundDiagnostic): boolean {
+  return (
+    diagnostic.category === 'unsupported-subset' ||
+    diagnostic.code === 'unsupported_in_ai_subset' ||
+    diagnostic.payload?.operation === 'ai-subset-check'
+  );
+}
+
+function formatSpan(diagnostic: PlaygroundDiagnostic): string | null {
+  const span = diagnostic.span;
+  if (span == null) {
+    return null;
+  }
+  const samePosition = span.startLine === span.endLine && span.startColumn === span.endColumn;
+  const end = samePosition ? '' : `-${span.endLine}:${span.endColumn}`;
+  return `line ${span.startLine}:${span.startColumn}${end}`;
+}
+
+function formatDiagnosticPayload(diagnostic: PlaygroundDiagnostic): string | null {
+  const payload = diagnostic.payload;
+  if (payload == null) {
+    return null;
+  }
+  const entries = [
+    payload.operation ? `operation: ${payload.operation}` : null,
+    payload.targetPath ? `path: ${payload.targetPath}` : null,
+    payload.expectedKind ? `expected: ${payload.expectedKind}` : null,
+    payload.actualKind ? `actual: ${payload.actualKind}` : null,
+    payload.hint ? `hint: ${payload.hint}` : null
+  ].filter((item): item is string => item != null);
+  return entries.length > 0 ? entries.join(' | ') : null;
+}
+
+function diagnosticsForInspect(result: PlaygroundInspectPayload | null): PlaygroundDiagnostic[] {
+  if (result == null) {
+    return [];
+  }
+  return [...result.diagnostics, ...result.warnings];
+}
+
+function subsetBlockersForInspect(result: PlaygroundInspectPayload | null): PlaygroundDiagnostic[] {
+  return diagnosticsForInspect(result).filter(isSubsetBlocker);
+}
+
+function compatibilityLabel(result: PlaygroundInspectPayload | null): string {
+  if (result == null) {
+    return 'Not inspected';
+  }
+  if (result.subsetCompatibility === 'COMPATIBLE') {
+    return 'Compatible';
+  }
+  if (result.subsetCompatibility === 'INCOMPATIBLE') {
+    return 'Incompatible';
+  }
+  return 'Unknown';
+}
+
+function compatibilityClass(result: PlaygroundInspectPayload | null): string {
+  return result?.subsetCompatibility.toLowerCase() ?? 'not-inspected';
+}
+
 export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundProps) {
   const programContainerRef = React.useRef<HTMLDivElement | null>(null);
   const inputContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -150,10 +258,15 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
   const programEditorRef = React.useRef<monaco.editor.IStandaloneCodeEditor>();
   const inputEditorRef = React.useRef<monaco.editor.IStandaloneCodeEditor>();
   const workerRef = React.useRef<Worker>();
+  const requestIdRef = React.useRef(0);
+  const [playgroundState, setPlaygroundState] = React.useState(() => createInitialPlaygroundState());
+  const [catalogCategory, setCatalogCategory] = React.useState<CatalogCategoryFilter>('all');
+  const [catalogAiSubset, setCatalogAiSubset] = React.useState<CatalogAiSubsetFilter>('all');
   const [inputFormat, setInputFormat] = React.useState<InputFormat>('json');
   const [outputFormat, setOutputFormat] = React.useState<OutputFormat>('json');
 
   const [isRunning, setIsRunning] = React.useState(false);
+  const [activeInspectTab, setActiveInspectTab] = React.useState<InspectTab>('normalized');
   const [error, setError] = React.useState<string | null>(null);
   const [output, setOutput] = React.useState('');
   const [traceHuman, setTraceHuman] = React.useState<string | null>(null);
@@ -182,6 +295,11 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
 
     return items.sort((a, b) => a.title.localeCompare(b.title));
   }, []);
+  const categoryOptions = React.useMemo(() => catalogCategoryOptions(examples), [examples]);
+  const filteredExamples = React.useMemo(
+    () => filterCatalogExamples(examples, { category: catalogCategory, aiSubset: catalogAiSubset }),
+    [catalogAiSubset, catalogCategory, examples]
+  );
   const [selectedExampleId, setSelectedExampleId] = React.useState(() =>
     resolveDefaultExample(examples, defaultExampleId)
   );
@@ -193,6 +311,10 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
     () => buildHostedPlaygroundUrl(selectedExampleId),
     [selectedExampleId]
   );
+  const selectedExampleInFiltered = filteredExamples.some((example) => example.id === selectedExampleId);
+  const visibleSelectedExample = selectedExampleInFiltered ? selectedExample : null;
+  const selectedTags = visibleSelectedExample ? visibleCatalogTags(visibleSelectedExample.tags) : [];
+  const hiddenTagCount = visibleSelectedExample ? Math.max(0, visibleSelectedExample.tags.length - selectedTags.length) : 0;
   const [isTracingEnabled, setIsTracingEnabled] = React.useState<boolean>(() => selectedExample?.enableTracing ?? false);
   const [isContractsEnabled, setIsContractsEnabled] = React.useState<boolean>(() => selectedExample?.enableContracts ?? false);
   const [contractsMode, setContractsMode] = React.useState<ContractMode>('off');
@@ -202,6 +324,9 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
   const run = React.useCallback(() => {
     const program = programEditorRef.current?.getValue() ?? '';
     const input = inputEditorRef.current?.getValue() ?? '';
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setPlaygroundState((state) => startInspectRequest(state, requestId));
     setIsRunning(true);
     setError(null);
     setTraceHuman(null);
@@ -211,9 +336,11 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
     setContractSource(null);
     setContractWarnings(null);
     workerRef.current?.postMessage({
+      requestId,
       code: program,
       input,
       trace: tracingRef.current,
+      inspect: true,
       inputFormat,
       outputFormat,
       includeContracts: isContractsEnabled,
@@ -243,6 +370,7 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
     setOutputFormat(outputFmt);
 
     setError(null);
+    setIsRunning(false);
     setOutput('');
     setTraceHuman(null);
     setTraceJson(null);
@@ -250,6 +378,9 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
     setOutputContract(null);
     setContractSource(null);
     setContractWarnings(null);
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setPlaygroundState((state) => cancelInspectRequest(state, requestId));
     if (outputRef.current) {
       outputRef.current.textContent = '';
     }
@@ -287,6 +418,14 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
     workerRef.current = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     workerRef.current.onmessage = (event: MessageEvent<WorkerResult>) => {
       const result = event.data;
+      setPlaygroundState((state) =>
+        receiveInspectResult(state, result.requestId, result.inspectResult, result.inspectError).state
+      );
+
+      if (result.requestId !== requestIdRef.current) {
+        return;
+      }
+
       setIsRunning(false);
 
       if (programEditorRef.current) {
@@ -359,6 +498,13 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
   }, []);
 
   React.useEffect(() => {
+    if (filteredExamples.length === 0 || selectedExampleInFiltered) {
+      return;
+    }
+    setSelectedExampleId(filteredExamples[0].id);
+  }, [filteredExamples, selectedExampleInFiltered]);
+
+  React.useEffect(() => {
     if (!programEditorRef.current || !inputEditorRef.current || !selectedExample) {
       return;
     }
@@ -396,6 +542,10 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
   }, [contractsMode]);
 
   const hasTrace = Boolean(traceHuman || traceJson);
+  const inspectState = playgroundState.inspect;
+  const inspectDiagnostics = diagnosticsForInspect(inspectState.result);
+  const inspectBlockers = subsetBlockersForInspect(inspectState.result);
+  const inspectCompatibility = compatibilityLabel(inspectState.result);
 
   const programWheelGuardRef = React.useRef<(event: WheelEvent) => void>();
   const inputWheelGuardRef = React.useRef<(event: WheelEvent) => void>();
@@ -450,14 +600,44 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
           </p>
         </div>
         <div className="playground-controls">
+          <label className="playground-select playground-select--compact">
+            <span>Category</span>
+            <select
+              value={catalogCategory}
+              onChange={(event) => setCatalogCategory(event.target.value as CatalogCategoryFilter)}
+            >
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="playground-select playground-select--compact">
+            <span>AI subset</span>
+            <select
+              value={catalogAiSubset}
+              onChange={(event) => setCatalogAiSubset(event.target.value as CatalogAiSubsetFilter)}
+            >
+              {CATALOG_AI_SUBSET_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="playground-select">
             <span>Example</span>
             <select
               data-playground-example-select
-              value={selectedExampleId}
+              value={selectedExampleInFiltered ? selectedExampleId : ''}
               onChange={(event) => setSelectedExampleId(event.target.value)}
+              disabled={filteredExamples.length === 0}
             >
-              {examples.map((example) => (
+              {filteredExamples.length === 0 ? (
+                <option value="">No examples match</option>
+              ) : null}
+              {filteredExamples.map((example) => (
                 <option key={example.id} value={example.id}>
                   {example.title}
                 </option>
@@ -524,11 +704,34 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
           <button className="playground-button" onClick={run} disabled={isRunning}>
             {isRunning ? 'Running…' : 'Run ▶'}
           </button>
+          <span className="playground-catalog-count" aria-live="polite">
+            {filteredExamples.length} of {examples.length} examples
+          </span>
         </div>
       </header>
 
-      {selectedExample?.description ? (
-        <div className="example-description">{selectedExample.description}</div>
+      {visibleSelectedExample ? (
+        <div className="example-description">
+          {visibleSelectedExample.description ? <p>{visibleSelectedExample.description}</p> : null}
+          <div className="example-metadata" aria-label="Selected example metadata">
+            <span className="example-metadata__badge example-metadata__badge--category">
+              {catalogCategoryLabel(catalogCategoryValue(visibleSelectedExample))}
+            </span>
+            <span className={`example-metadata__badge example-metadata__badge--ai-${visibleSelectedExample.aiSubset}`}>
+              {catalogAiSubsetLabel(visibleSelectedExample.aiSubset)}
+            </span>
+            {selectedTags.map((tag) => (
+              <span key={tag} className="example-metadata__badge example-metadata__badge--tag">
+                {tag}
+              </span>
+            ))}
+            {hiddenTagCount > 0 ? (
+              <span className="example-metadata__badge example-metadata__badge--tag">
+                +{hiddenTagCount}
+              </span>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="playground-note">
@@ -634,6 +837,111 @@ export function BranchlinePlayground({ defaultExampleId }: BranchlinePlaygroundP
               ) : null}
             </>
           )}
+        </section>
+
+        <section className="panel playground-main__inspect inspect-panel">
+          <header className="panel-header inspect-panel__header">
+            <div>
+              <h3>Inspect</h3>
+              <p>Normalized source, diagnostics, and AI subset compatibility.</p>
+            </div>
+            <span
+              className={`inspect-compatibility inspect-compatibility--${compatibilityClass(inspectState.result)}`}
+            >
+              {inspectCompatibility}
+            </span>
+          </header>
+          <div className="inspect-tabs" role="tablist" aria-label="Inspect panes">
+            {INSPECT_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`inspect-tab${activeInspectTab === tab.id ? ' inspect-tab--active' : ''}`}
+                role="tab"
+                aria-selected={activeInspectTab === tab.id}
+                onClick={() => setActiveInspectTab(tab.id)}
+              >
+                {tab.label}
+                {tab.id === 'diagnostics' && inspectDiagnostics.length > 0 ? (
+                  <span className="inspect-tab__count">{inspectDiagnostics.length}</span>
+                ) : null}
+                {tab.id === 'blockers' && inspectBlockers.length > 0 ? (
+                  <span className="inspect-tab__count">{inspectBlockers.length}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+          <div className="inspect-content" role="tabpanel">
+            {inspectState.isLoading ? (
+              <div className="inspect-state">Inspecting current program…</div>
+            ) : inspectState.error ? (
+              <div className="inspect-state inspect-state--error">{inspectState.error}</div>
+            ) : activeInspectTab === 'normalized' ? (
+              inspectState.result?.normalizedSource ? (
+                <pre className="inspect-code">{inspectState.result.normalizedSource}</pre>
+              ) : (
+                <div className="inspect-state">
+                  {inspectState.result
+                    ? 'No normalized source is available for this program.'
+                    : 'Run the playground to view normalized source.'}
+                </div>
+              )
+            ) : activeInspectTab === 'diagnostics' ? (
+              inspectDiagnostics.length > 0 ? (
+                <div className="diagnostic-list">
+                  {inspectDiagnostics.map((diagnostic, index) => {
+                    const span = formatSpan(diagnostic);
+                    const payload = formatDiagnosticPayload(diagnostic);
+                    return (
+                      <div
+                        key={`${diagnostic.code}-${index}`}
+                        className={`diagnostic-item diagnostic-item--${diagnostic.severity.toLowerCase()}`}
+                      >
+                        <div className="diagnostic-item__meta">
+                          <span>{diagnostic.severity}</span>
+                          <span>{diagnostic.category}</span>
+                          <span>{diagnostic.code}</span>
+                          {span ? <span>{span}</span> : null}
+                        </div>
+                        <div className="diagnostic-item__message">{diagnostic.message}</div>
+                        {payload ? (
+                          <div className="diagnostic-item__payload">{payload}</div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="inspect-state">
+                  {inspectState.result ? 'No diagnostics reported.' : 'Run the playground to view diagnostics.'}
+                </div>
+              )
+            ) : inspectBlockers.length > 0 ? (
+              <div className="diagnostic-list">
+                {inspectBlockers.map((diagnostic, index) => {
+                  const span = formatSpan(diagnostic);
+                  return (
+                    <div key={`${diagnostic.code}-${index}`} className="diagnostic-item diagnostic-item--blocker">
+                      <div className="diagnostic-item__meta">
+                        <span>{diagnostic.payload?.actualKind ?? diagnostic.code}</span>
+                        {span ? <span>{span}</span> : null}
+                      </div>
+                      <div className="diagnostic-item__message">{diagnostic.message}</div>
+                      {diagnostic.payload?.hint ? (
+                        <div className="diagnostic-item__payload">{diagnostic.payload.hint}</div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="inspect-state">
+                {inspectState.result
+                  ? 'No AI subset blockers reported.'
+                  : 'Run the playground to view subset blockers.'}
+              </div>
+            )}
+          </div>
         </section>
       </main>
     </div>

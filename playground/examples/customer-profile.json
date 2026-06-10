@@ -1,5 +1,9 @@
 {
   "title": "Customer profile enrichment",
+  "id": "customer-profile",
+  "category": "business-transform",
+  "tags": ["customer", "profile", "format", "get", "case", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Build a normalized customer profile with FORMAT/GET helpers and a CASE-backed loyalty fallback.",
   "showContracts": true,
   "program": [
@@ -21,5 +25,11 @@
     "address": {
       "city": "London"
     }
+  },
+  "expectedOutput": {
+    "id": 42,
+    "full_name": "Ada Lovelace",
+    "loyalty_tier": "standard",
+    "shipping_city": "London"
   }
 }

@@ -4,8 +4,10 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-02-01
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Added G6 benchmark risk refresh: VM optimization claims need fallback-state and impossible-row reporting before public comparison use."
   - date: 2026-02-01
     change: "Migrated from research/optimizations.md and added YAML front matter."
 ---
@@ -16,6 +18,13 @@ changelog:
 - Stage: Partial.
 - VM call/lambda paths were improved, but env mirroring, tracing overhead, allocators, and inline caches remain hotspots.
 - Next: address remaining hotspots and refresh perf baselines.
+
+## G6 Benchmark Risk Refresh (2026-06-10)
+
+- The current JSONata cross-engine benchmark cannot yet prove VM optimization progress because `branchline-vm` rows do not say whether VM bytecode executed or `VMExec` fell back to the interpreter.
+- The required G6 run showed `performance/case001` Branchline VM at 5,095.741 ops/s versus Branchline interpreter at 12,557.890 ops/s in a short smoke run, so VM overhead remains visible for at least one non-trivial row.
+- Several representative G2/G3 rows reported hundreds of millions of ops/s with near-zero allocation for Branchline interpreter and VM. Treat those as benchmark credibility failures, not VM wins.
+- Runtime optimization follow-up should wait for benchmark metadata that records VM fallback count/state, disabled/error state, validation state, and allocation sanity per row.
 
 
 ## What the VM Does Today
@@ -31,5 +40,6 @@ changelog:
 2. **Opcode IDs for tracing.** Replace reflection-based names in the hot loop with integer opcode IDs, gating human-readable labels behind debug tracing.
 3. **Specialised builders and quickening.** Add `MAKE_OBJECT_1/2/4`, small-array constructors, and inline caches for `ACCESS_STATIC`/`SET_STATIC` and host indices.
 4. **Profile-guided cleanup.** Re-run the JMH suite once the structural items land to verify gains and chase residual hotspots (e.g., map churn in MODIFY/APPEND).
+5. **Benchmark observability.** Expose VM fallback and execution-path state to benchmark/reporting code before publishing VM speed ratios.
 
 These changes build on the current implementation and aim to clear the remaining bottlenecks before tackling cross-platform backends.

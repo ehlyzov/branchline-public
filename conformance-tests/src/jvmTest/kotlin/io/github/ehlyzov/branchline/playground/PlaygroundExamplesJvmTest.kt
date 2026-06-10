@@ -4,7 +4,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.isRegularFile
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import io.github.ehlyzov.branchline.BranchlineFacade
+import io.github.ehlyzov.branchline.BranchlineInspectRequest
+import io.github.ehlyzov.branchline.BranchlineSubsetCompatibility
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -37,6 +41,34 @@ class PlaygroundExamplesJvmTest {
     }
 
     @Test
+    fun `reports AI-compatible examples whose source differs from normalized source`() {
+        val descriptor = PlaygroundExampleDescriptor(
+            id = "legacy-example",
+            category = "docs",
+            tags = listOf("ai-canonical"),
+            aiSubset = "compatible",
+            expectedOutput = null,
+            contractExpectation = null,
+            diagnosticExpectation = null,
+        )
+
+        val warnings = nonCanonicalAiCompatibleExampleWarnings(
+            exampleId = "legacy-example",
+            descriptor = descriptor,
+            source = "TRANSFORM Legacy {\n    OUTPUT { greeting: row.name }\n}",
+            normalizedSource = "TRANSFORM Legacy {\n    OUTPUT { greeting: input.name }\n}",
+        )
+
+        assertEquals(
+            listOf(
+                "PLAYGROUND_EXAMPLE_WARNING id=legacy-example " +
+                    "reason=ai-compatible-source-differs-from-normalized-source",
+            ),
+            warnings,
+        )
+    }
+
+    @Test
     fun `all playground examples execute without errors`() {
         val examplesDir = Path.of("..", "playground", "examples").toAbsolutePath().normalize()
         require(Files.exists(examplesDir)) { "Examples directory not found: $examplesDir" }
@@ -48,6 +80,8 @@ class PlaygroundExamplesJvmTest {
         }
 
         val failures = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val descriptors = mutableListOf<PlaygroundExampleDescriptor>()
         val hostFns = StdLib.fns + mapOf("NOW" to deterministicNow)
 
         for (examplePath in exampleFiles) {
@@ -63,6 +97,53 @@ class PlaygroundExamplesJvmTest {
                 } else {
                     val name = examplePath.fileName.toString().removeSuffix(".json")
                     sharedPrefix + "TRANSFORM ${name.replace('-', '_')} {\n$programBody\n}"
+                }
+                val exampleId = examplePath.fileName.toString().removeSuffix(".json")
+                val descriptor = playgroundExampleDescriptor(example)
+                val metadataFailures = validateMigratedPlaygroundExampleDescriptor(exampleId, descriptor)
+                require(metadataFailures.isEmpty()) {
+                    "Metadata validation failed in $examplePath:\n${metadataFailures.joinToString("\n")}"
+                }
+                if (exampleId in MigratedPlaygroundExampleIds) {
+                    descriptors += descriptor
+                }
+                val needsInspect = descriptor.aiSubset == "compatible" ||
+                    descriptor.contractExpectation != null ||
+                    descriptor.diagnosticExpectation != null
+                if (needsInspect) {
+                    val inspectResult = BranchlineFacade.inspect(
+                        BranchlineInspectRequest(
+                            programText = program,
+                            includeNormalizedSource = true,
+                        ),
+                    )
+                    if (descriptor.aiSubset == "compatible") {
+                        assertTrue(inspectResult.success, "Inspect failed for AI-compatible example $examplePath")
+                        assertTrue(
+                            inspectResult.subsetCompatibility == BranchlineSubsetCompatibility.COMPATIBLE,
+                            "Example $examplePath is marked aiSubset=compatible but inspect returned " +
+                                "${inspectResult.subsetCompatibility}: ${inspectResult.diagnostics}",
+                        )
+                        warnings += nonCanonicalAiCompatibleExampleWarnings(
+                            exampleId = exampleId,
+                            descriptor = descriptor,
+                            source = program,
+                            normalizedSource = inspectResult.normalizedSource,
+                        )
+                    }
+                    val inspectPayload = inspectResult.inspectJsonPayload()
+                    assertPlaygroundExpectationSubset(
+                        exampleId,
+                        "contractExpectation",
+                        descriptor.contractExpectation,
+                        inspectPayload,
+                    )
+                    assertPlaygroundExpectationSubset(
+                        exampleId,
+                        "diagnosticExpectation",
+                        descriptor.diagnosticExpectation,
+                        inspectPayload,
+                    )
                 }
                 val inputElement = example["input"] ?: JsonObject(emptyMap())
 
@@ -104,6 +185,8 @@ class PlaygroundExamplesJvmTest {
                 val vmOutput = runnerVm(seededInput)
                 assertTrue(interpOutput != null, "Example $examplePath produced null output in interpreter")
                 assertTrue(vmOutput != null, "Example $examplePath produced null output in VM")
+                assertExpectedPlaygroundOutput(exampleId, descriptor.expectedOutput, interpOutput)
+                assertExpectedPlaygroundOutput(exampleId, descriptor.expectedOutput, vmOutput)
                 assertTrue(
                     interpOutput == vmOutput,
                     "Example $examplePath interpreter/VM mismatch. interp=$interpOutput vm=$vmOutput",
@@ -112,6 +195,13 @@ class PlaygroundExamplesJvmTest {
                 failures += "$examplePath -> ${ex::class.simpleName}: ${ex.message}"
             }
         }
+        try {
+            assertMinimumPlaygroundExampleExpectations(descriptors)
+        } catch (ex: Throwable) {
+            failures += "playground expectation count -> ${ex::class.simpleName}: ${ex.message}"
+        }
+
+        warnings.forEach(::println)
 
         if (failures.isNotEmpty()) {
             error("Playground examples failed:\n${failures.joinToString("\n")}")

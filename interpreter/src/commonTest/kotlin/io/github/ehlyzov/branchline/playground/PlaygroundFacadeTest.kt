@@ -53,6 +53,24 @@ public class PlaygroundFacadeTest {
     }
 
     @Test
+    public fun inspectExposesStructuredEnvelopeForPlaygroundState() {
+        val result = PlaygroundFacade.inspect(bodyOnlyProgram)
+
+        assertTrue(result.success)
+        assertNull(result.errorMessage)
+        assertEquals("COMPATIBLE", result.subsetCompatibility)
+        assertNotNull(result.normalizedSource)
+        assertTrue(result.normalizedSource.contains("TRANSFORM Playground"))
+
+        val diagnostics = Json.parseToJsonElement(result.diagnosticsJson).jsonArray
+        assertTrue(diagnostics.isEmpty())
+
+        val featureUsage = Json.parseToJsonElement(result.featureUsageJson).jsonObject
+        val features = featureUsage["features"]?.jsonArray ?: error("missing features")
+        assertTrue(features.any { it.toString().trim('"') == "let" })
+    }
+
+    @Test
     public fun runWithMalformedJsonReportsFailure() {
         val result = PlaygroundFacade.run(
             bodyOnlyProgram,

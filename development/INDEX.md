@@ -7,6 +7,16 @@ superseded_by: []
 last_updated: 2026-06-10
 changelog:
   - date: 2026-06-10
+    change: "Completed Branchline DX T9-T18 after benchmark hardening; final playground/docs/test/contour verification passed."
+  - date: 2026-06-10
+    change: "Closed Branchline DX T9/T16 and added the Playground Example Metadata development record."
+  - date: 2026-06-10
+    change: "Completed short benchmark hardening increment; JSONata summaries now consume state reports and exclude non-comparable/flagged rows from speedups."
+  - date: 2026-06-10
+    change: "Started short benchmark hardening increment before resuming Branchline DX T9-T18."
+  - date: 2026-06-10
+    change: "Closed benchmark readiness G7 as Ready with caveats and moved benchmark readiness planning/docs records to implemented."
+  - date: 2026-06-10
     change: "Implemented CLI conversion warning single-pass audit for output warning collection."
   - date: 2026-06-10
     change: "Implemented ContractValidator lookup/domain cache task under Interpreter Performance Tasks."
@@ -155,7 +165,6 @@ This index is the canonical entry point for the /development knowledge base. All
 - [Tree Structures](runtime/tree-structures.md) -- arena/array tree structure recommendations.
 - [I/O Contract Gap Analysis](language/io-contracts-gap-analysis.md) -- parser + I/O contract comparison and enrichment targets.
 - [Two-Layer Mutation Syntax](language/two-layer-mutation-syntax.md) -- implemented two-layer mutation model with comprehensions plus += accumulators.
-- [Benchmarks Docs Fix Plan](docs/benchmarks-docs-fix-plan.md) -- MkDocs/benchmarks patch plan.
 - [Docs Generate Diplodoc CLI Fix](docs/docs-generate-diplodoc-cli-fix.md) -- root-cause fix for docsGenerate npm executable resolution.
 - [Docs + Playground Plan](docs/docs-playground-plan.md) -- docs plan; depends on Docs Refresh.
 - [I/O Contracts Milestone Plan](planning/io-contracts-milestone-plan.md) -- implementation order and agent instructions.
@@ -173,9 +182,14 @@ This index is the canonical entry point for the /development knowledge base. All
 
 ### Implemented
 - [Service Knowledge Contour Bootstrap](docs/service-knowledge-contour-bootstrap.md) -- minimal repository contour and lifecycle scripts.
+- [Branchline Benchmark Readiness Plan](planning/branchline-benchmark-readiness-plan.md) -- benchmark-first gate completed as Ready with caveats; DX T9-T18 may resume while public speed claims remain gated.
+- [Branchline Benchmark Hardening Plan](planning/branchline-benchmark-hardening-plan.md) -- row-state and credibility guard completed before Branchline DX T9-T18 resumes.
+- [Branchline Benchmark Agent Goals](planning/branchline-benchmark-agent-goals.md) -- G0-G7 goal-mode benchmark readiness sequence completed.
+- [Benchmarks Docs Fix Plan](docs/benchmarks-docs-fix-plan.md) -- MkDocs/benchmark publication plumbing and public framing repaired locally; release-asset validation remains external.
 - [Playground And CI Regression Fixes](docs/playground-ci-regression-fixes.md) -- Kotlin/JS dependency loading, docs/assets cleanup, and decimal JMH summary arithmetic.
 - [CLI Conversion Warning Single-Pass Audit](tooling/cli-conversion-warning-single-pass-audit.md) -- single recursive output warning audit for CLI JSON/XML conversion warnings.
 - [CBOR Deterministic Encode Reuse](runtime/cbor-deterministic-encode-reuse.md) -- reuse canonical deterministic set element bytes during CBOR output.
+- [Playground Example Metadata](docs/playground-example-metadata.md) -- retrieval metadata schema and first migrated playground example slice.
 - [VM Array Comprehension Linearization](runtime/vm-array-comprehension-linearization.md) -- replace compiler-generated copy-per-append VM comprehension bytecode with a linear accumulator path.
 - [Contract Type Precision Upgrade](language/contract-type-precision-upgrade.md) -- latest-only contract stack hard-cut plus nullable precision, closure/domain fixes, and SemVer contract-diff gates.
 - [CLI Rollout](tooling/cli-rollout.md) -- JVM/JS CLI shipped.

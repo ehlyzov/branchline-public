@@ -11,6 +11,11 @@ kotlin {
         }
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()
+            onOutput { descriptor, event ->
+                event.message.readLines()
+                    .findAll { it.contains("PLAYGROUND_EXAMPLE_WARNING") }
+                    .each { logger.lifecycle(it.trim()) }
+            }
         }
     }
     js(IR) {

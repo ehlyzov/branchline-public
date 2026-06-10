@@ -1,5 +1,9 @@
 {
   "title": "Shared Memory: Reads",
+  "id": "shared-memory-read",
+  "category": "advanced",
+  "tags": ["shared-memory", "await-shared", "state", "advanced"],
+  "aiSubset": "incompatible",
   "description": "Reads session state from shared storage. Run \"Shared Memory: SHARED and Writes\" in another playground tab (same origin) to seed data, then run this example with the same userId.",
   "shared": [
     {
@@ -20,5 +24,20 @@
   ],
   "input": {
     "userId": "riley"
+  },
+  "expectedOutput": {
+    "sharedKey": "riley",
+    "found": false,
+    "session": null
+  },
+  "diagnosticExpectation": {
+    "success": true,
+    "subsetCompatibility": "INCOMPATIBLE",
+    "diagnostics": [
+      {
+        "code": "unsupported_in_ai_subset",
+        "category": "unsupported-subset"
+      }
+    ]
   }
 }

@@ -1,5 +1,9 @@
 {
   "title": "XML output ordering shape",
+  "id": "xml-output-ordering",
+  "category": "xml",
+  "tags": ["xml-output", "ordering", "namespaces", "attributes", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Builds an XML-shaped object using @order and @xmlns for deterministic XML serialization.",
   "program": [
     "OUTPUT {",
@@ -16,5 +20,33 @@
     "    }",
     "}"
   ],
-  "input": {}
+  "input": {},
+  "expectedOutput": {
+    "invoice": {
+      "@xmlns": {
+        "x": "urn:line-items"
+      },
+      "@id": "INV-7",
+      "@order": [
+        "total",
+        "x:item"
+      ],
+      "customer": {
+        "$": "Ada"
+      },
+      "x:item": [
+        {
+          "@sku": "A",
+          "$": "2"
+        },
+        {
+          "@sku": "B",
+          "$": "1"
+        }
+      ],
+      "total": {
+        "$": "3"
+      }
+    }
+  }
 }

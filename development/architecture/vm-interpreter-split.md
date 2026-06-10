@@ -4,8 +4,10 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-02-01
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Added G6 fallback-risk note: public benchmark rows still cannot distinguish VM bytecode execution from interpreter fallback."
   - date: 2026-02-01
     change: "Migrated from research/splitvm.md and added YAML front matter."
   - date: 2026-02-01
@@ -18,6 +20,12 @@ changelog:
 - Stage: Partial.
 - `compileStream` selects interpreter or VM backends, but VM still mirrors `row` and falls back to the interpreter when instructions are missing.
 - Next: fill missing VM instructions and remove the fallback path.
+
+## G6 Fallback Risk Refresh (2026-06-10)
+
+- `VMExec` still catches VM compilation/execution failures and falls back to the interpreter. That keeps runtime behavior safe, but benchmark consumers cannot tell whether a `branchline-vm` row used bytecode or fallback execution.
+- G6 required benchmark smoke completed successfully, but `performance/case001` still showed VM slower than the interpreter, and multiple representative rows looked optimized away or otherwise non-credible.
+- The split remains partial for publication purposes until VM rows expose execution-path metadata: bytecode executed, compile fallback, execution fallback, disabled/error, and validation state.
 
 
 ## Current Shape
@@ -35,3 +43,4 @@ changelog:
 - Formalize a public compiler API (e.g., `BranchlineCompiler.compile(transform, engine = …)`) in a small façade module/package that delegates to the VM/interpreter internals.
 - Move shared IR builders, tracing hooks, and host-function registries into common source sets so both interpreter and VM can depend on them without cyclic references.
 - Introduce an environment builder in the future `platform` module that the VM/interpreter runners consume, aligning the execution contract across engines.
+- Add a narrow VM execution-status channel that benchmarks and reports can consume without scraping logs.

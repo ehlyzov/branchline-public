@@ -1,5 +1,9 @@
 {
   "title": "Transform Options",
+  "id": "transform-options",
+  "category": "advanced",
+  "tags": ["options", "adapters", "shared", "buffer-mode", "advanced"],
+  "aiSubset": "incompatible",
   "description": "Demonstrates per-transform OPTIONS configuration.",
   "showContracts": false,
   "program": [
@@ -14,5 +18,18 @@
   ],
   "input": {
     "name": "Riley"
+  },
+  "expectedOutput": {
+    "greeting": "Hello, Riley"
+  },
+  "diagnosticExpectation": {
+    "success": true,
+    "subsetCompatibility": "INCOMPATIBLE",
+    "diagnostics": [
+      {
+        "code": "unsupported_in_ai_subset",
+        "category": "unsupported-subset"
+      }
+    ]
   }
 }

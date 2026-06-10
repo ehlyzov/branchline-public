@@ -1,5 +1,9 @@
 {
   "title": "Contract: input-seeded wildcard output",
+  "id": "contract-input-seeded-wildcard-output",
+  "category": "contracts",
+  "tags": ["contract-inference", "dynamic-access", "typed-signature", "wildcard-output", "ai-canonical"],
+  "aiSubset": "compatible",
   "description": "Uses a typed input signature with CASE fallback logic and dynamic-key conservatism for wildcard output inference.",
   "program": [
     "TRANSFORM Normalize(input: { payload?: { name: text }, metrics: { count: number }, key: text }) -> _ {",
@@ -24,5 +28,22 @@
       "extra": "9"
     },
     "key": "extra"
+  },
+  "contractExpectation": {
+    "success": true,
+    "subsetCompatibility": "COMPATIBLE",
+    "transforms": [
+      {
+        "name": "Normalize",
+        "contractSource": "inferred",
+        "mergedContract": {
+          "output": {
+            "root": {
+              "kind": "object"
+            }
+          }
+        }
+      }
+    ]
   }
 }

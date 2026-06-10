@@ -152,6 +152,8 @@ FUNC buildRuntimeSection(rows) {
     LET lines = [];
     SET lines = APPEND(lines, "## Runtime and allocation (mean, p95)");
     SET lines = APPEND(lines, "");
+    SET lines = APPEND(lines, "Source data: [CSV](jmh-summary.csv).");
+    SET lines = APPEND(lines, "");
     SET lines = APPEND(lines, "| Runtime | Dataset | Mean (us/op) | p95 (us/op) | Alloc (B/op) | Params |");
     SET lines = APPEND(lines, "| --- | --- | ---: | ---: | ---: | --- |");
 

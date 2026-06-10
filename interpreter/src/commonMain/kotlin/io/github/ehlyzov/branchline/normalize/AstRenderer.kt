@@ -261,8 +261,14 @@ public object AstRenderer {
                 appendExprBreaking(sb, stmt.value, indent)
             }
             is SetVarStmt -> {
-                sb.append("SET ").append(stmt.name).append(" = ")
-                appendExprBreaking(sb, stmt.value, indent)
+                val appendedValue = safeSelfAppendValue(stmt.name, stmt.value)
+                if (appendedValue != null) {
+                    sb.append(stmt.name).append(" += ")
+                    appendExprBreaking(sb, appendedValue, indent)
+                } else {
+                    sb.append("SET ").append(stmt.name).append(" = ")
+                    appendExprBreaking(sb, stmt.value, indent)
+                }
             }
             is PlusAssignStmt -> {
                 sb.append(renderExpr(stmt.target))
@@ -322,6 +328,14 @@ public object AstRenderer {
                 "Graph outputs are not supported in the canonical subset.",
             )
         }
+    }
+
+    private fun safeSelfAppendValue(targetName: String, value: Expr): Expr? {
+        val call = value as? CallExpr ?: return null
+        if (call.callee.name != "APPEND" || call.args.size != 2) return null
+
+        val firstArg = call.args.first() as? IdentifierExpr ?: return null
+        return if (firstArg.name == targetName) call.args[1] else null
     }
 
     private fun renderModify(sb: StringBuilder, stmt: ModifyStmt, indent: Int) {

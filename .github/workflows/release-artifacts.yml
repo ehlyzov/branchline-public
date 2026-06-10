@@ -208,7 +208,8 @@ jobs:
       - name: Build JSONata summary
         if: env.RUN_JSONATA == 'true'
         run: |
-          ./gradlew --no-daemon :cli:runBl --args "$GITHUB_WORKSPACE/.github/scripts/jsonata-report.bl --shared-file jmh=$GITHUB_WORKSPACE/jsonata-benchmarks/build/results/jmh/results.json --shared-format json --shared-key basename --write-output --write-output-dir $GITHUB_WORKSPACE/build/jsonata-benchmarks --output-format json-compact"
+          test -s "$GITHUB_WORKSPACE/jsonata-benchmarks/build/reports/jsonata-benchmarks/state-report.json"
+          ./gradlew --no-daemon :cli:runBl --args "$GITHUB_WORKSPACE/.github/scripts/jsonata-report.bl --shared-file jmh=$GITHUB_WORKSPACE/jsonata-benchmarks/build/results/jmh/results.json --shared-file state=$GITHUB_WORKSPACE/jsonata-benchmarks/build/reports/jsonata-benchmarks/state-report.json --shared-format json --shared-key basename --write-output --write-output-dir $GITHUB_WORKSPACE/build/jsonata-benchmarks --output-format json-compact"
 
       - name: List artifacts
         run: |
