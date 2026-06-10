@@ -690,7 +690,7 @@ class Compiler(
 
     private fun compileArrayCompExpr(expr: ArrayCompExpr) {
         // Accumulator for results
-        emit(MAKE_ARRAY(0))
+        emit(ARRAY_BUILDER_INIT)
 
         // Iterable to loop over
         compileExpr(expr.iterable)
@@ -712,7 +712,7 @@ class Compiler(
 
         // Map expression result appended to accumulator
         compileExpr(expr.mapExpr)
-        emit(APPEND)
+        emit(ARRAY_BUILDER_ADD)
 
         setLabel(loopContinue)
 
@@ -721,6 +721,7 @@ class Compiler(
         addUnresolvedJump(instructions.size - 1, loopEnd, "NEXT_FOREACH_END")
 
         setLabel(loopEnd)
+        emit(ARRAY_BUILDER_FINISH)
     }
 
     private fun compileObjectExpr(expr: ObjectExpr) {

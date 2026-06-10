@@ -63,13 +63,16 @@ public class ContractValidator {
         includeHeuristic: Boolean = false,
     ): ContractValidationResult {
         val violations = mutableListOf<ContractViolation>()
+        val context = ValidationContext()
         validateNode(
+            context = context,
             node = requirement.root,
             value = value,
             path = listOf(PathSegment.Root("input")),
             violations = violations,
         )
         validateObligations(
+            context = context,
             obligations = requirement.obligations,
             root = value,
             rootName = "input",
@@ -105,13 +108,16 @@ public class ContractValidator {
             return ContractValidationResult(sortViolations(violations))
         }
         if (value != null) {
+            val context = ValidationContext()
             validateNode(
+                context = context,
                 node = guarantee.root,
                 value = value,
                 path = listOf(PathSegment.Root("output")),
                 violations = violations,
             )
             validateObligations(
+                context = context,
                 obligations = guarantee.obligations,
                 root = value,
                 rootName = "output",
@@ -131,6 +137,7 @@ public class ContractValidator {
     }
 
     private fun validateNode(
+        context: ValidationContext,
         node: Node,
         value: Any?,
         path: List<PathSegment>,
@@ -155,22 +162,21 @@ public class ContractValidator {
             )
             return
         }
-        validateDomains(node.domains, value, path, violations)
+        validateDomains(context, node.domains, value, path, violations)
         when (node.kind) {
             NodeKind.OBJECT -> {
                 val map = value as? Map<*, *> ?: return
-                val fieldMap = map.entries.associate { entry -> entry.key?.toString() to entry.value }
+                val fieldMap = context.stringKeyView(map)
                 for ((name, child) in node.children) {
-                    validateNode(child, fieldMap[name], appendField(path, name), violations)
+                    validateNode(context, child, fieldMap.lastValue(name), appendField(path, name), violations)
                 }
                 if (!node.open) {
                     for (key in fieldMap.keys) {
-                        if (key == null) continue
                         if (!node.children.containsKey(key)) {
                             violations += ContractViolation(
                                 path = renderPath(appendField(path, key)),
                                 kind = ContractViolationKind.UNEXPECTED_FIELD,
-                                actual = valueShapeOf(fieldMap[key]),
+                                actual = valueShapeOf(fieldMap.lastValue(key)),
                             )
                         }
                     }
@@ -184,7 +190,7 @@ public class ContractValidator {
                 }
                 val elementNode = node.element ?: return
                 items.forEachIndexed { index, item ->
-                    validateNode(elementNode, item, appendIndex(path, index), violations)
+                    validateNode(context, elementNode, item, appendIndex(path, index), violations)
                 }
             }
             NodeKind.SET -> {
@@ -192,7 +198,7 @@ public class ContractValidator {
                 val elementNode = node.element ?: return
                 var index = 0
                 for (item in set) {
-                    validateNode(elementNode, item, appendIndex(path, index), violations)
+                    validateNode(context, elementNode, item, appendIndex(path, index), violations)
                     index += 1
                 }
             }
@@ -209,13 +215,14 @@ public class ContractValidator {
     }
 
     private fun validateDomains(
+        context: ValidationContext,
         domains: List<ValueDomain>,
         value: Any?,
         path: List<PathSegment>,
         violations: MutableList<ContractViolation>,
     ) {
         for (domain in domains) {
-            if (domainMatches(domain, value)) continue
+            if (domainMatches(context, domain, value)) continue
             violations += ContractViolation(
                 path = renderPath(path),
                 kind = ContractViolationKind.SHAPE_MISMATCH,
@@ -227,6 +234,7 @@ public class ContractValidator {
     }
 
     private fun validateObligations(
+        context: ValidationContext,
         obligations: List<ContractObligation>,
         root: Any?,
         rootName: String,
@@ -238,7 +246,7 @@ public class ContractValidator {
         for (obligation in obligations) {
             if (obligation.confidence < confidenceThreshold) continue
             if (!includeHeuristic && obligation.heuristic) continue
-            val ok = evaluateExpr(obligation.expr, rootMap)
+            val ok = evaluateExpr(context, obligation.expr, rootMap)
             if (ok) continue
             violations += ContractViolation(
                 path = renderConstraintPath(rootName, obligation.expr),
@@ -248,17 +256,17 @@ public class ContractValidator {
         }
     }
 
-    private fun evaluateExpr(expr: ConstraintExpr, root: Map<*, *>): Boolean = when (expr) {
-        is ConstraintExpr.PathPresent -> resolvePathValue(root, expr.path.segments, requireNonNull = false).present
-        is ConstraintExpr.PathNonNull -> resolvePathValue(root, expr.path.segments, requireNonNull = true).present
-        is ConstraintExpr.OneOf -> expr.children.any { child -> evaluateExpr(child, root) }
-        is ConstraintExpr.AllOf -> expr.children.all { child -> evaluateExpr(child, root) }
+    private fun evaluateExpr(context: ValidationContext, expr: ConstraintExpr, root: Map<*, *>): Boolean = when (expr) {
+        is ConstraintExpr.PathPresent -> resolvePathValue(context, root, expr.path.segments, requireNonNull = false).present
+        is ConstraintExpr.PathNonNull -> resolvePathValue(context, root, expr.path.segments, requireNonNull = true).present
+        is ConstraintExpr.OneOf -> expr.children.any { child -> evaluateExpr(context, child, root) }
+        is ConstraintExpr.AllOf -> expr.children.all { child -> evaluateExpr(context, child, root) }
         is ConstraintExpr.DomainConstraint -> {
-            val resolved = resolvePathValue(root, expr.path.segments, requireNonNull = false)
-            resolved.present && domainMatches(expr.domain, resolved.value)
+            val resolved = resolvePathValue(context, root, expr.path.segments, requireNonNull = false)
+            resolved.present && domainMatches(context, expr.domain, resolved.value)
         }
         is ConstraintExpr.Exists -> {
-            val resolved = resolvePathValue(root, expr.path.segments, requireNonNull = false)
+            val resolved = resolvePathValue(context, root, expr.path.segments, requireNonNull = false)
             val value = resolved.value
             val count = when (value) {
                 is List<*> -> value.size
@@ -270,7 +278,7 @@ public class ContractValidator {
             resolved.present && count >= expr.minCount
         }
         is ConstraintExpr.ForAll -> {
-            val resolved = resolvePathValue(root, expr.path.segments, requireNonNull = false)
+            val resolved = resolvePathValue(context, root, expr.path.segments, requireNonNull = false)
             if (!resolved.present) return false
             val items = when (val value = resolved.value) {
                 is List<*> -> value
@@ -280,15 +288,17 @@ public class ContractValidator {
             }
             items.all { item ->
                 val map = item as? Map<*, *> ?: return@all false
-                val byName = map.entries.associate { entry -> entry.key?.toString() to entry.value }
-                val requiredOk = expr.requiredFields.all { field -> byName.containsKey(field) && byName[field] != null }
+                val byName = context.stringKeyView(map)
+                val requiredOk = expr.requiredFields.all { field ->
+                    byName.containsKey(field) && byName.lastValue(field) != null
+                }
                 val domainsOk = expr.fieldDomains.all { (field, domain) ->
-                    val value = byName[field]
-                    value != null && domainMatches(domain, value)
+                    val value = byName.lastValue(field)
+                    value != null && domainMatches(context, domain, value)
                 }
                 val anyOfOk = expr.requireAnyOf.all { alternatives ->
                     alternatives.any { name ->
-                        byName.containsKey(name) && byName[name] != null
+                        byName.containsKey(name) && byName.lastValue(name) != null
                     }
                 }
                 requiredOk && domainsOk && anyOfOk
@@ -310,8 +320,8 @@ public class ContractValidator {
         NodeKind.UNION -> node.options.any { option -> matchesNodeKind(option, value) }
     }
 
-    private fun domainMatches(domain: ValueDomain, value: Any?): Boolean = when (domain) {
-        is ValueDomain.EnumText -> value is String && value in domain.values
+    private fun domainMatches(context: ValidationContext, domain: ValueDomain, value: Any?): Boolean = when (domain) {
+        is ValueDomain.EnumText -> value is String && value in context.enumValues(domain)
         is ValueDomain.NumberRange -> {
             val number = (value as? Number)?.toDouble() ?: return false
             val minOk = domain.min?.let { number >= it } ?: true
@@ -321,7 +331,7 @@ public class ContractValidator {
         }
         is ValueDomain.Regex -> {
             val text = value as? String ?: return false
-            Regex(domain.pattern).matches(text)
+            context.regex(domain).matches(text)
         }
     }
 
@@ -405,6 +415,7 @@ public class ContractValidator {
     }
 
     private fun resolvePathValue(
+        context: ValidationContext,
         root: Map<*, *>,
         segments: List<AccessSegment>,
         requireNonNull: Boolean,
@@ -420,25 +431,25 @@ public class ContractValidator {
                         current = null
                         break
                     }
-                    val key = map.keys.firstOrNull { key -> key?.toString() == segment.name }
-                    if (key == null) {
+                    val fieldMap = context.stringKeyView(map)
+                    if (!fieldMap.containsKey(segment.name)) {
                         present = false
                         current = null
                         break
                     }
-                    current = map[key]
+                    current = fieldMap.firstValue(segment.name)
                 }
                 is AccessSegment.Index -> {
                     current = when (current) {
                         is List<*> -> current.getOrNull(segment.index.toIntOrNull() ?: -1)
                         is Array<*> -> current.getOrNull(segment.index.toIntOrNull() ?: -1)
                         is Map<*, *> -> {
-                            val key = current.keys.firstOrNull { key -> key?.toString() == segment.index }
-                            if (key == null) {
+                            val fieldMap = context.stringKeyView(current)
+                            if (!fieldMap.containsKey(segment.index)) {
                                 present = false
                                 null
                             } else {
-                                current[key]
+                                fieldMap.firstValue(segment.index)
                             }
                         }
                         else -> {
@@ -483,6 +494,60 @@ public class ContractValidator {
 
     private fun sortViolations(items: List<ContractViolation>): List<ContractViolation> =
         items.sortedWith(compareBy({ it.path }, { it.kind.name }, { it.ruleId ?: "" }))
+}
+
+private class ValidationContext {
+    private val stringKeyViews = mutableListOf<StringKeyViewCacheEntry>()
+    private val enumValueSets = mutableMapOf<ValueDomain.EnumText, Set<String>>()
+    private val regexes = mutableMapOf<String, Regex>()
+
+    fun stringKeyView(map: Map<*, *>): StringKeyMapView {
+        val cached = stringKeyViews.firstOrNull { entry -> entry.map === map }
+        if (cached != null) return cached.view
+        val view = StringKeyMapView.from(map)
+        stringKeyViews += StringKeyViewCacheEntry(map, view)
+        return view
+    }
+
+    fun enumValues(domain: ValueDomain.EnumText): Set<String> =
+        enumValueSets.getOrPut(domain) { domain.values.toSet() }
+
+    fun regex(domain: ValueDomain.Regex): Regex =
+        regexes.getOrPut(domain.pattern) { Regex(domain.pattern) }
+}
+
+private data class StringKeyViewCacheEntry(
+    val map: Map<*, *>,
+    val view: StringKeyMapView,
+)
+
+private class StringKeyMapView(
+    private val firstValues: Map<String, Any?>,
+    private val lastValues: Map<String, Any?>,
+) {
+    val keys: Set<String>
+        get() = lastValues.keys
+
+    fun containsKey(key: String): Boolean = firstValues.containsKey(key)
+
+    fun firstValue(key: String): Any? = firstValues[key]
+
+    fun lastValue(key: String): Any? = lastValues[key]
+
+    companion object {
+        fun from(map: Map<*, *>): StringKeyMapView {
+            val firstValues = LinkedHashMap<String, Any?>()
+            val lastValues = LinkedHashMap<String, Any?>()
+            for ((rawKey, value) in map) {
+                val key = rawKey?.toString() ?: continue
+                if (!firstValues.containsKey(key)) {
+                    firstValues[key] = value
+                }
+                lastValues[key] = value
+            }
+            return StringKeyMapView(firstValues, lastValues)
+        }
+    }
 }
 
 private sealed interface PathSegment {

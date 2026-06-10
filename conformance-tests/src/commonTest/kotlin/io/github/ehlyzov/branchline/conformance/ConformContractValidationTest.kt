@@ -12,6 +12,7 @@ import io.github.ehlyzov.branchline.contract.GuaranteeSchema
 import io.github.ehlyzov.branchline.contract.Node
 import io.github.ehlyzov.branchline.contract.NodeKind
 import io.github.ehlyzov.branchline.contract.RequirementSchema
+import io.github.ehlyzov.branchline.contract.ValueDomain
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -180,5 +181,133 @@ class ConformContractValidationTest {
         )
         val violations = ContractEnforcer.enforceOutput(ContractValidationMode.WARN, guarantee, payload)
         assertTrue(violations.isEmpty())
+    }
+
+    @Test
+    fun repeated_path_constraints_reuse_stringified_key_lookup_during_one_validation() {
+        val key = CountingKey("1")
+        val path = AccessPath(listOf(AccessSegment.Field("1")))
+        val requirement = RequirementSchema(
+            root = Node(required = true, kind = NodeKind.ANY),
+            obligations = listOf(
+                ContractObligation(
+                    expr = ConstraintExpr.PathNonNull(path),
+                    ruleId = "key-present",
+                ),
+                ContractObligation(
+                    expr = ConstraintExpr.DomainConstraint(path, ValueDomain.Regex("[A-Z]{3}-\\d{2}")),
+                    ruleId = "key-regex-a",
+                ),
+                ContractObligation(
+                    expr = ConstraintExpr.DomainConstraint(path, ValueDomain.Regex("[A-Z]{3}-\\d{2}")),
+                    ruleId = "key-regex-b",
+                ),
+            ),
+            opaqueRegions = emptyList(),
+        )
+        val payload = linkedMapOf<Any?, Any?>(key to "ABC-12")
+
+        val violations = ContractEnforcer.enforceInput(ContractValidationMode.WARN, requirement, payload)
+
+        assertTrue(violations.isEmpty())
+        assertTrue(
+            key.toStringCalls <= 1,
+            "stringified map-key lookup should be reused within one validation; calls=${key.toStringCalls}",
+        )
+    }
+
+    @Test
+    fun cached_validation_preserves_stringified_key_forall_and_regex_domain_behavior() {
+        val numericFirst = linkedMapOf<Any?, Any?>(
+            7 to "numeric-first",
+            "7" to "string-second",
+        )
+        val stringFirst = linkedMapOf<Any?, Any?>(
+            "7" to "string-first",
+            7 to "numeric-second",
+        )
+        assertTrue(
+            ContractEnforcer.enforceInput(
+                ContractValidationMode.WARN,
+                enumRequirement("7", "numeric-first"),
+                numericFirst,
+            ).isEmpty(),
+        )
+        assertTrue(
+            ContractEnforcer.enforceInput(
+                ContractValidationMode.WARN,
+                enumRequirement("7", "string-first"),
+                stringFirst,
+            ).isEmpty(),
+        )
+
+        val forAllRequirement = RequirementSchema(
+            root = Node(required = true, kind = NodeKind.ANY),
+            obligations = listOf(
+                ContractObligation(
+                    expr = ConstraintExpr.ForAll(
+                        path = AccessPath(listOf(AccessSegment.Field("items"))),
+                        requiredFields = listOf("id"),
+                        fieldDomains = linkedMapOf(
+                            "kind" to ValueDomain.EnumText(listOf("alpha", "beta")),
+                            "code" to ValueDomain.Regex("[A-Z]{2}-\\d{2}"),
+                        ),
+                        requireAnyOf = listOf(listOf("primary", "secondary")),
+                    ),
+                    ruleId = "items-forall",
+                ),
+            ),
+            opaqueRegions = emptyList(),
+        )
+        val valid = mapOf(
+            "items" to listOf(
+                mapOf(
+                    "id" to 1,
+                    "kind" to "alpha",
+                    "code" to "AB-12",
+                    "secondary" to "fallback",
+                ),
+            ),
+        )
+        val invalidRegex = mapOf(
+            "items" to listOf(
+                mapOf(
+                    "id" to 1,
+                    "kind" to "alpha",
+                    "code" to "bad",
+                    "primary" to "main",
+                ),
+            ),
+        )
+
+        assertTrue(ContractEnforcer.enforceInput(ContractValidationMode.WARN, forAllRequirement, valid).isEmpty())
+        val violations = ContractEnforcer.enforceInput(ContractValidationMode.WARN, forAllRequirement, invalidRegex)
+        assertEquals(1, violations.size)
+        assertEquals(ContractViolationKind.MISSING_CONDITIONAL_GROUP, violations.single().kind)
+        assertEquals("items-forall", violations.single().ruleId)
+    }
+
+    private fun enumRequirement(path: String, expected: String): RequirementSchema = RequirementSchema(
+        root = Node(required = true, kind = NodeKind.ANY),
+        obligations = listOf(
+            ContractObligation(
+                expr = ConstraintExpr.DomainConstraint(
+                    path = AccessPath(listOf(AccessSegment.Field(path))),
+                    domain = ValueDomain.EnumText(listOf(expected)),
+                ),
+                ruleId = "stringified-key-domain",
+            ),
+        ),
+        opaqueRegions = emptyList(),
+    )
+
+    private class CountingKey(private val label: String) {
+        var toStringCalls: Int = 0
+            private set
+
+        override fun toString(): String {
+            toStringCalls += 1
+            return label
+        }
     }
 }

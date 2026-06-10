@@ -14,6 +14,23 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class CborCodecTest {
+    @Suppress("OVERRIDE_DEPRECATION")
+    private class CountingIntegerNumber(
+        private val value: Long,
+        private val conversions: MutableList<Long>,
+    ) : Number() {
+        override fun toByte(): Byte = value.toByte()
+        override fun toChar(): Char = value.toInt().toChar()
+        override fun toDouble(): Double {
+            conversions.add(value)
+            return value.toDouble()
+        }
+        override fun toFloat(): Float = value.toFloat()
+        override fun toInt(): Int = value.toInt()
+        override fun toLong(): Long = value
+        override fun toShort(): Short = value.toShort()
+    }
+
     @Test
     fun roundTripPreservesExtendedValueTypes() {
         val bigInt = blBigIntParse("9007199254740993")
@@ -140,5 +157,30 @@ class CborCodecTest {
         val firstDeterministic = encodeCborValue(first, deterministic)
         val secondDeterministic = encodeCborValue(second, deterministic)
         assertContentEquals(firstDeterministic, secondDeterministic)
+    }
+
+    @Test
+    fun deterministicEncodingReusesNestedSetElementBytes() {
+        val conversions = mutableListOf<Long>()
+        val value = linkedSetOf<Any?>(
+            linkedSetOf<Any?>(
+                CountingIntegerNumber(2L, conversions),
+            ),
+        )
+
+        val encoded = encodeCborValue(value, CborEncodeOptions(deterministic = true))
+
+        assertContentEquals(
+            byteArrayOf(
+                0xD9.toByte(), 0x01, 0x0B,
+                0x81.toByte(),
+                0xD9.toByte(), 0x01, 0x0B,
+                0x81.toByte(),
+                0x02,
+            ),
+            encoded,
+        )
+        assertEquals(setOf(setOf(2L)), decodeCborValue(encoded))
+        assertEquals(listOf(2L), conversions)
     }
 }

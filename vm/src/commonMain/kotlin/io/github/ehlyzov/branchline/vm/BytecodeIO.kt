@@ -122,6 +122,9 @@ object BytecodeIO {
         is Instruction.SET_STATIC -> SerializedInstruction("SET_STATIC", key = unwrapKeyConst(instruction.key).toString())
         Instruction.SET_DYNAMIC -> SerializedInstruction("SET_DYNAMIC")
         Instruction.APPEND -> SerializedInstruction("APPEND")
+        Instruction.ARRAY_BUILDER_INIT -> SerializedInstruction("ARRAY_BUILDER_INIT")
+        Instruction.ARRAY_BUILDER_ADD -> SerializedInstruction("ARRAY_BUILDER_ADD")
+        Instruction.ARRAY_BUILDER_FINISH -> SerializedInstruction("ARRAY_BUILDER_FINISH")
         Instruction.PLUS_ASSIGN -> SerializedInstruction("PLUS_ASSIGN")
         Instruction.CONCAT -> SerializedInstruction("CONCAT")
         is Instruction.JUMP -> SerializedInstruction("JUMP", i = instruction.address)
@@ -185,6 +188,9 @@ object BytecodeIO {
         "SET_STATIC" -> Instruction.SET_STATIC(ObjKey.Name(serialized.key!!))
         "SET_DYNAMIC" -> Instruction.SET_DYNAMIC
         "APPEND" -> Instruction.APPEND
+        "ARRAY_BUILDER_INIT" -> Instruction.ARRAY_BUILDER_INIT
+        "ARRAY_BUILDER_ADD" -> Instruction.ARRAY_BUILDER_ADD
+        "ARRAY_BUILDER_FINISH" -> Instruction.ARRAY_BUILDER_FINISH
         "PLUS_ASSIGN" -> Instruction.PLUS_ASSIGN
         "CONCAT" -> Instruction.CONCAT
         "JUMP" -> Instruction.JUMP(serialized.i!!)

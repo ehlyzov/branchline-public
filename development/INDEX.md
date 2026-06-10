@@ -4,10 +4,18 @@ depends_on: []
 blocks: []
 supersedes: ['planning/current-research-tasks']
 superseded_by: []
-last_updated: 2026-04-30
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Implemented CLI conversion warning single-pass audit for output warning collection."
+  - date: 2026-06-10
+    change: "Implemented ContractValidator lookup/domain cache task under Interpreter Performance Tasks."
   - date: 2026-05-29
     change: "Implemented Branchline DX hardening H3 for additive diagnostics model evolution."
+  - date: 2026-06-10
+    change: "Implemented VM array-comprehension linearization to remove copy-per-append behavior from compiler-generated VM comprehensions."
+  - date: 2026-06-10
+    change: "Implemented deterministic CBOR set encode reuse to emit already-sorted canonical element bytes."
   - date: 2026-05-29
     change: "Implemented Branchline DX T8 mutation runtime diagnostic adapters and CLI JSON error propagation."
   - date: 2026-05-29
@@ -166,6 +174,9 @@ This index is the canonical entry point for the /development knowledge base. All
 ### Implemented
 - [Service Knowledge Contour Bootstrap](docs/service-knowledge-contour-bootstrap.md) -- minimal repository contour and lifecycle scripts.
 - [Playground And CI Regression Fixes](docs/playground-ci-regression-fixes.md) -- Kotlin/JS dependency loading, docs/assets cleanup, and decimal JMH summary arithmetic.
+- [CLI Conversion Warning Single-Pass Audit](tooling/cli-conversion-warning-single-pass-audit.md) -- single recursive output warning audit for CLI JSON/XML conversion warnings.
+- [CBOR Deterministic Encode Reuse](runtime/cbor-deterministic-encode-reuse.md) -- reuse canonical deterministic set element bytes during CBOR output.
+- [VM Array Comprehension Linearization](runtime/vm-array-comprehension-linearization.md) -- replace compiler-generated copy-per-append VM comprehension bytecode with a linear accumulator path.
 - [Contract Type Precision Upgrade](language/contract-type-precision-upgrade.md) -- latest-only contract stack hard-cut plus nullable precision, closure/domain fixes, and SemVer contract-diff gates.
 - [CLI Rollout](tooling/cli-rollout.md) -- JVM/JS CLI shipped.
 - [Playground Examples Modernization](docs/playground-examples-modernization.md) -- aggressive modern-style rewrite of all playground examples with validation coverage.

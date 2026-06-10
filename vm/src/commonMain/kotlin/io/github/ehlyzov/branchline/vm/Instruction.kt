@@ -52,6 +52,9 @@ object InstructionTable {
         arrayOf(OperandType.OBJ_KEY), // SET_STATIC
         emptyArray(), // SET_DYNAMIC
         emptyArray(), // APPEND
+        emptyArray(), // ARRAY_BUILDER_INIT
+        emptyArray(), // ARRAY_BUILDER_ADD
+        emptyArray(), // ARRAY_BUILDER_FINISH
         emptyArray(), // PLUS_ASSIGN
         emptyArray(), // CONCAT
         arrayOf(OperandType.INT), // JUMP
@@ -200,6 +203,15 @@ sealed class Instruction {
 
     /** Append value to array/list */
     object APPEND : Instruction()
+
+    /** Create an internal mutable accumulator for compiler-generated array comprehensions */
+    object ARRAY_BUILDER_INIT : Instruction()
+
+    /** Append top stack value into the internal array accumulator below it */
+    object ARRAY_BUILDER_ADD : Instruction()
+
+    /** Finish an internal array accumulator and leave the resulting list on the stack */
+    object ARRAY_BUILDER_FINISH : Instruction()
 
     /** Apply Branchline '+=' to list, numeric, or string values */
     object PLUS_ASSIGN : Instruction()
@@ -377,6 +389,9 @@ data class Bytecode(
             Opcode.SET_STATIC -> Instruction.SET_STATIC(getObjKeyOperand(pc))
             Opcode.SET_DYNAMIC -> Instruction.SET_DYNAMIC
             Opcode.APPEND -> Instruction.APPEND
+            Opcode.ARRAY_BUILDER_INIT -> Instruction.ARRAY_BUILDER_INIT
+            Opcode.ARRAY_BUILDER_ADD -> Instruction.ARRAY_BUILDER_ADD
+            Opcode.ARRAY_BUILDER_FINISH -> Instruction.ARRAY_BUILDER_FINISH
             Opcode.PLUS_ASSIGN -> Instruction.PLUS_ASSIGN
             Opcode.CONCAT -> Instruction.CONCAT
             Opcode.JUMP -> Instruction.JUMP(getIntOperand(pc))
@@ -513,6 +528,9 @@ data class Bytecode(
                     is Instruction.SET_STATIC -> Opcode.SET_STATIC.ordinal
                     Instruction.SET_DYNAMIC -> Opcode.SET_DYNAMIC.ordinal
                     Instruction.APPEND -> Opcode.APPEND.ordinal
+                    Instruction.ARRAY_BUILDER_INIT -> Opcode.ARRAY_BUILDER_INIT.ordinal
+                    Instruction.ARRAY_BUILDER_ADD -> Opcode.ARRAY_BUILDER_ADD.ordinal
+                    Instruction.ARRAY_BUILDER_FINISH -> Opcode.ARRAY_BUILDER_FINISH.ordinal
                     Instruction.PLUS_ASSIGN -> Opcode.PLUS_ASSIGN.ordinal
                     Instruction.CONCAT -> Opcode.CONCAT.ordinal
                     is Instruction.JUMP -> Opcode.JUMP.ordinal

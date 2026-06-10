@@ -3,9 +3,11 @@ package io.github.ehlyzov.branchline.vm
 import io.github.ehlyzov.branchline.Parser
 import io.github.ehlyzov.branchline.*
 import io.github.ehlyzov.branchline.ir.*
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class VMTest {
@@ -211,5 +213,33 @@ class VMTest {
         val result = vm.execute(bytecode, env)
 
         assertEquals(listOf(2, 3), result)
+    }
+
+    @Test
+    fun `array comprehension bytecode uses linear accumulator path`() {
+        fun parseExpr(src: String): Expr {
+            val program = Parser(Lexer("FUNC f() = $src ;").lex()).parse()
+            val func = program.decls[0] as FuncDecl
+            return (func.body as ExprBody).expr
+        }
+
+        val expr = parseExpr("[x FOR EACH x IN list WHERE x > 1]")
+        val bytecode = Compiler().compile(listOf(IRExprStmt(expr)))
+
+        assertFalse(
+            bytecode.instructions.any { it === Instruction.APPEND },
+            "compiler-generated array comprehensions must not use copy-per-append APPEND",
+        )
+    }
+
+    @Test
+    fun `vm hot loop dispatches opcodes without materializing instructions`() {
+        val source = File("src/commonMain/kotlin/io/github/ehlyzov/branchline/vm/VM.kt").readText()
+        val runBody = source.substringAfter("private fun run(").substringBefore("private fun executeInstruction(")
+
+        assertFalse(
+            runBody.contains("getInstruction("),
+            "VM hot loop must not reconstruct Instruction objects for every opcode",
+        )
     }
 }

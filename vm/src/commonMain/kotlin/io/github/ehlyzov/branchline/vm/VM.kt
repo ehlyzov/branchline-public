@@ -222,37 +222,28 @@ class VM(
             val currentPc = pc
             emitEnterEventsAt(currentPc)
 
-            val instruction = currentBytecode.getInstruction(currentPc)
+            val opcode = OPCODES[currentBytecode.getOpcode(currentPc)]
             val tracer = currentTracer()
-            val opName = instruction::class.simpleName ?: "?"
             if (tracer is CollectingTracer) {
-                val opcode = when (instruction) {
-                    Instruction.OUTPUT_1, Instruction.OUTPUT_2 -> Opcode.OUTPUT
-                    is Instruction.LOAD_LOCAL -> Opcode.LOAD_LOCAL
-                    is Instruction.STORE_LOCAL -> Opcode.STORE_LOCAL
-                    else -> try { Opcode.valueOf(opName) } catch (_: Exception) { null }
-                }
-                if (opcode != null) {
-                    val key = opcode.name
-                    tracer.instructionCounts[key] = (tracer.instructionCounts[key] ?: 0L) + 1
-                }
+                val key = opcode.name
+                tracer.instructionCounts[key] = (tracer.instructionCounts[key] ?: 0L) + 1
             }
 
             if (tracer?.opts?.step == true) {
-                tracer.on(TraceEvent.Call("STEP", opName, emptyList()))
+                tracer.on(TraceEvent.Call("STEP", opcode.name, emptyList()))
             }
 
             var executed = false
             activePc = currentPc
             try {
-                executeInstruction(instruction)
+                executeOpcode(opcode)
                 executed = true
                 if (tracer?.opts?.step == true) {
-                    tracer.on(TraceEvent.Return("STEP", opName, peekOrNull()))
+                    tracer.on(TraceEvent.Return("STEP", opcode.name, peekOrNull()))
                 }
             } catch (e: Exception) {
                 if (tracer?.opts?.step == true) {
-                    tracer.on(TraceEvent.Error("VM step ${instruction::class.simpleName}", e))
+                    tracer.on(TraceEvent.Error("VM step ${opcode.name}", e))
                 }
                 val handled = handleException(e)
                 if (!handled) {
@@ -378,6 +369,9 @@ class VM(
             is Instruction.SET_STATIC -> setStatic(instruction.key)
             is Instruction.SET_DYNAMIC -> setDynamic()
             is Instruction.APPEND -> appendToArray()
+            Instruction.ARRAY_BUILDER_INIT -> initArrayBuilder()
+            Instruction.ARRAY_BUILDER_ADD -> arrayBuilderAdd()
+            Instruction.ARRAY_BUILDER_FINISH -> arrayBuilderFinish()
             is Instruction.PLUS_ASSIGN -> plusAssign()
             is Instruction.CONCAT -> concatenateArrays()
 
@@ -522,6 +516,9 @@ class VM(
             Opcode.SET_STATIC -> setStatic(bytecode.getObjKeyOperand(pc))
             Opcode.SET_DYNAMIC -> setDynamic()
             Opcode.APPEND -> appendToArray()
+            Opcode.ARRAY_BUILDER_INIT -> initArrayBuilder()
+            Opcode.ARRAY_BUILDER_ADD -> arrayBuilderAdd()
+            Opcode.ARRAY_BUILDER_FINISH -> arrayBuilderFinish()
             Opcode.PLUS_ASSIGN -> plusAssign()
             Opcode.CONCAT -> concatenateArrays()
 
@@ -534,18 +531,18 @@ class VM(
             // Function Calls
             Opcode.CALL -> {
                 val name = bytecode.getStringOperand(pc)
-                val argc = bytecode.getIntOperand(pc, 1)
+                val argc = bytecode.getIntOperand(pc)
                 callFunction(name, argc)
             }
             Opcode.CALL_HOST -> {
                 val index = bytecode.getIntOperand(pc)
-                val name = bytecode.getStringOperand(pc, 1)
-                val argc = bytecode.getIntOperand(pc, 2)
+                val name = bytecode.getStringOperand(pc)
+                val argc = bytecode.getIntOperand(pc, 1)
                 callHostIndexed(index, name, argc)
             }
             Opcode.CALL_FN -> {
                 val name = bytecode.getStringOperand(pc)
-                val argc = bytecode.getIntOperand(pc, 1)
+                val argc = bytecode.getIntOperand(pc)
                 callUserFunction(name, argc)
             }
             Opcode.CALL_LAMBDA -> callLambda(bytecode.getIntOperand(pc))
@@ -883,6 +880,25 @@ class VM(
         if (arr is List<*>) out.add(elem)
         push(out)
     }
+    private fun initArrayBuilder() {
+        push(ArrayList<Any?>())
+    }
+    private fun arrayBuilderAdd() {
+        val elem = pop()
+        val builder = peek()
+        if (builder !is MutableList<*>) {
+            throw VMException.TypeMismatch("array builder", builder?.let { it::class.simpleName } ?: "null")
+        }
+        @Suppress("UNCHECKED_CAST")
+        (builder as MutableList<Any?>).add(elem)
+    }
+    private fun arrayBuilderFinish() {
+        val builder = pop()
+        if (builder !is List<*>) {
+            throw VMException.TypeMismatch("array builder", builder?.let { it::class.simpleName } ?: "null")
+        }
+        push(builder)
+    }
     private fun plusAssign() {
         val value = pop()
         val current = pop()
@@ -1067,7 +1083,7 @@ class VM(
         // Bytecode changed: rebuild host index table to avoid stale mappings
         hostByIndex.clear()
         for (i in 0 until bytecode.size()) {
-            val op = Opcode.values()[bytecode.getOpcode(i)]
+            val op = OPCODES[bytecode.getOpcode(i)]
             if (op == Opcode.CALL_HOST) {
                 val idx = bytecode.getIntOperand(i, 0)
                 val name = bytecode.getStringOperand(i, 0)
@@ -1383,6 +1399,7 @@ class VM(
     companion object {
         private const val MAX_STACK_SIZE = 10000
         private const val MAX_CALL_DEPTH = 500
+        private val OPCODES = Opcode.values()
 
         /** Restore a VM from a JSON snapshot. Provide hostFns/funcs for runtime. */
         fun restoreFromSnapshot(

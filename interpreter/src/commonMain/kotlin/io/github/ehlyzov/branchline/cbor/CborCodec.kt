@@ -154,16 +154,21 @@ private class CborEncoder(
 
     private fun writeSet(values: Set<*>) {
         writeTag(TAG_BRANCHLINE_SET)
-        val items = if (options.deterministic) {
-            values.map { element ->
-                DeterministicValue(element, deterministicBytesForValue(element))
+        if (options.deterministic) {
+            val items = values.map { element ->
+                deterministicBytesForValue(element)
             }.sortedWith { left, right ->
-                compareDeterministicBytes(left.bytes, right.bytes)
-            }.map { it.value }
-        } else {
-            values.toList()
+                compareDeterministicBytes(left, right)
+            }
+
+            writeTypeAndArgument(MAJOR_ARRAY, items.size.toULong())
+            for (bytes in items) {
+                writeBytes(bytes)
+            }
+            return
         }
 
+        val items = values.toList()
         writeTypeAndArgument(MAJOR_ARRAY, items.size.toULong())
         for (value in items) {
             writeValue(value)
@@ -366,11 +371,6 @@ private class CborEncoder(
         out.add((value and 0xFF).toByte())
     }
 }
-
-private data class DeterministicValue(
-    val value: Any?,
-    val bytes: ByteArray,
-)
 
 private data class DeterministicMapEntry(
     val key: Any,

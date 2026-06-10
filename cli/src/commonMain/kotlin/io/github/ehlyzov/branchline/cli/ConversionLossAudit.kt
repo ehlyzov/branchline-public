@@ -55,19 +55,33 @@ public fun collectOutputConversionWarnings(
     val warnings = LinkedHashSet<String>()
     when (format) {
         OutputFormat.JSON, OutputFormat.JSON_COMPACT, OutputFormat.JSON_CANONICAL -> {
-            if (containsByteArray(value)) {
+            val audit = OutputConversionAudit(
+                auditJsonByteArrays = true,
+                auditJsonExtendedPrecision = jsonNumberMode == JsonNumberMode.EXTENDED,
+                auditJsonCanonicalKeyReorder = format == OutputFormat.JSON_CANONICAL,
+                auditXmlMixedContent = false,
+            )
+            auditOutputValue(value, audit)
+            if (audit.hasJsonByteArray) {
                 warnings += WARN_JSON_BYTES_AS_BASE64
             }
-            if (jsonNumberMode == JsonNumberMode.EXTENDED && containsExtendedPrecisionRisk(value)) {
+            if (audit.hasJsonExtendedPrecisionRisk) {
                 warnings += WARN_JSON_EXTENDED_PRECISION
             }
-            if (format == OutputFormat.JSON_CANONICAL && containsCanonicalKeyReorderRisk(value)) {
+            if (audit.hasJsonCanonicalKeyReorderRisk) {
                 warnings += WARN_JSON_CANONICAL_KEY_REORDER
             }
         }
 
         OutputFormat.XML, OutputFormat.XML_COMPACT -> {
-            if (containsXmlOutputMixedContentLoss(value)) {
+            val audit = OutputConversionAudit(
+                auditJsonByteArrays = false,
+                auditJsonExtendedPrecision = false,
+                auditJsonCanonicalKeyReorder = false,
+                auditXmlMixedContent = true,
+            )
+            auditOutputValue(value, audit)
+            if (audit.hasXmlMixedContentLoss) {
                 warnings += WARN_XML_MIXED_CONTENT_ORDER_OUTPUT
             }
         }
@@ -114,101 +128,87 @@ private fun isXmlInputMixedContentMap(map: Map<*, *>): Boolean {
     return hasIndexedText && hasElementChildren
 }
 
-private fun containsByteArray(value: Any?): Boolean {
-    if (value is ByteArray) return true
-    val map = value as? Map<*, *>
-    if (map != null) {
-        for (entry in map.values) {
-            if (containsByteArray(entry)) return true
+private class OutputConversionAudit(
+    private val auditJsonByteArrays: Boolean,
+    private val auditJsonExtendedPrecision: Boolean,
+    private val auditJsonCanonicalKeyReorder: Boolean,
+    private val auditXmlMixedContent: Boolean,
+) {
+    var hasJsonByteArray: Boolean = false
+    var hasJsonExtendedPrecisionRisk: Boolean = false
+    var hasJsonCanonicalKeyReorderRisk: Boolean = false
+    var hasXmlMixedContentLoss: Boolean = false
+
+    fun isComplete(): Boolean =
+        (!auditJsonByteArrays || hasJsonByteArray) &&
+            (!auditJsonExtendedPrecision || hasJsonExtendedPrecisionRisk) &&
+            (!auditJsonCanonicalKeyReorder || hasJsonCanonicalKeyReorderRisk) &&
+            (!auditXmlMixedContent || hasXmlMixedContentLoss)
+
+    fun observeValue(value: Any?) {
+        if (auditJsonByteArrays && value is ByteArray) {
+            hasJsonByteArray = true
+        }
+        if (auditJsonExtendedPrecision && isExtendedPrecisionRisk(value)) {
+            hasJsonExtendedPrecisionRisk = true
         }
     }
-    val collection = value as? Collection<*>
-    if (collection != null) {
-        for (entry in collection) {
-            if (containsByteArray(entry)) return true
+
+    fun observeMap(map: Map<*, *>) {
+        if (auditJsonCanonicalKeyReorder && isCanonicalKeyReorderRisk(map)) {
+            hasJsonCanonicalKeyReorderRisk = true
+        }
+        if (auditXmlMixedContent && isXmlOutputMixedContentMap(map)) {
+            hasXmlMixedContentLoss = true
         }
     }
-    val array = value as? Array<*>
-    if (array != null) {
-        for (entry in array) {
-            if (containsByteArray(entry)) return true
-        }
-    }
-    return false
 }
 
-private fun containsExtendedPrecisionRisk(value: Any?): Boolean {
-    if (value is BLBigInt || value is BLBigDec || value is IBig || value is Dec) return true
-    if (value is Long && !isJsonSafeInteger(value)) return true
-    if (value is I64 && !isJsonSafeInteger(value.v)) return true
+private fun auditOutputValue(value: Any?, audit: OutputConversionAudit) {
+    audit.observeValue(value)
+    if (audit.isComplete()) return
+
     val map = value as? Map<*, *>
     if (map != null) {
+        audit.observeMap(map)
+        if (audit.isComplete()) return
         for (entry in map.values) {
-            if (containsExtendedPrecisionRisk(entry)) return true
+            auditOutputValue(entry, audit)
+            if (audit.isComplete()) return
         }
+        return
     }
+
     val collection = value as? Collection<*>
     if (collection != null) {
         for (entry in collection) {
-            if (containsExtendedPrecisionRisk(entry)) return true
+            auditOutputValue(entry, audit)
+            if (audit.isComplete()) return
         }
+        return
     }
+
     val array = value as? Array<*>
     if (array != null) {
         for (entry in array) {
-            if (containsExtendedPrecisionRisk(entry)) return true
+            auditOutputValue(entry, audit)
+            if (audit.isComplete()) return
         }
     }
-    return false
 }
 
-private fun containsCanonicalKeyReorderRisk(value: Any?): Boolean {
-    val map = value as? Map<*, *>
-    if (map != null) {
-        if (map.size > 1) {
-            val keys = map.keys.map { it?.toString() ?: "null" }
-            if (keys != keys.sorted()) return true
-        }
-        for (entry in map.values) {
-            if (containsCanonicalKeyReorderRisk(entry)) return true
-        }
-    }
-    val collection = value as? Collection<*>
-    if (collection != null) {
-        for (entry in collection) {
-            if (containsCanonicalKeyReorderRisk(entry)) return true
-        }
-    }
-    val array = value as? Array<*>
-    if (array != null) {
-        for (entry in array) {
-            if (containsCanonicalKeyReorderRisk(entry)) return true
-        }
-    }
-    return false
-}
+private fun isExtendedPrecisionRisk(value: Any?): Boolean =
+    value is BLBigInt ||
+        value is BLBigDec ||
+        value is IBig ||
+        value is Dec ||
+        value is Long && !isJsonSafeInteger(value) ||
+        value is I64 && !isJsonSafeInteger(value.v)
 
-private fun containsXmlOutputMixedContentLoss(value: Any?): Boolean {
-    val map = value as? Map<*, *>
-    if (map != null) {
-        if (isXmlOutputMixedContentMap(map)) return true
-        for (entry in map.values) {
-            if (containsXmlOutputMixedContentLoss(entry)) return true
-        }
-    }
-    val collection = value as? Collection<*>
-    if (collection != null) {
-        for (entry in collection) {
-            if (containsXmlOutputMixedContentLoss(entry)) return true
-        }
-    }
-    val array = value as? Array<*>
-    if (array != null) {
-        for (entry in array) {
-            if (containsXmlOutputMixedContentLoss(entry)) return true
-        }
-    }
-    return false
+private fun isCanonicalKeyReorderRisk(map: Map<*, *>): Boolean {
+    if (map.size <= 1) return false
+    val keys = map.keys.map { it?.toString() ?: "null" }
+    return keys != keys.sorted()
 }
 
 private fun isXmlOutputMixedContentMap(map: Map<*, *>): Boolean {

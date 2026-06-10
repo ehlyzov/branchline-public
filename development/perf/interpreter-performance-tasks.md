@@ -4,8 +4,12 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-02-01
+last_updated: 2026-06-10
 changelog:
+  - date: 2026-06-10
+    change: "Started ContractValidator lookup/domain cache task for per-validation string-key views, enum sets, and compiled regex reuse."
+  - date: 2026-06-10
+    change: "Implemented ContractValidator lookup/domain cache with focused conformance coverage."
   - date: 2026-02-01
     change: "Migrated from perf/tasks.md and added YAML front matter."
 ---
@@ -123,6 +127,23 @@ Verification (workflow):
   - `/Library/Java/JavaVirtualMachines/liberica-jdk-21.jdk/Contents/Home/bin/jfr print --json --events jdk.ExecutionSample --stack-depth 20 <profile.jfr> > perf/jfr/<case>-exec.json`
 - Summarize top frames using a script or manual inspection and update `perf/report.md`.
 
+## Task 7: ContractValidator lookup/domain cache
+
+Context:
+- Contract validation on large objects and quantified `ForAll` constraints repeats string-key map scans, enum list membership checks, and regex compilation.
+- Public serialized contract models and diagnostics ordering must remain unchanged.
+
+Goals:
+- Add per-validation helper state inside `ContractValidator`, not public model fields.
+- Reuse string-key map views while preserving first-match behavior for stringified map keys.
+- Reuse enum membership sets and compiled regex instances for repeated domain checks.
+- Keep validation output deterministic and compatible with existing diagnostics sorting.
+
+Verification:
+- Add focused conformance tests covering repeated string-key lookup, numeric/stringified map keys, `ForAll` field domains, and regex domains.
+- Run the narrow conformance test before and after implementation.
+- Run `./gradlew :interpreter:jvmTest :conformance-tests:jvmTest`.
+
 ## Progress
 
 - Task 1 (MAP/FILTER/FLATTEN fast paths):
@@ -177,3 +198,6 @@ Verification (workflow):
 - Task 6 (Standardize JFR analysis workflow):
   - Added `perf/scripts/jfr_extract.sh` to standardize extracting `jdk.ExecutionSample` stacks with consistent depth.
   - No runtime performance change; no JMH delta recorded.
+- Task 7 (ContractValidator lookup/domain cache):
+  - Implemented per-validation string-key views, enum membership sets, and compiled regex reuse.
+  - Verified with focused conformance tests plus `./gradlew :interpreter:jvmTest :conformance-tests:jvmTest`.
