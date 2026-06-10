@@ -4,8 +4,6 @@ site_description: A public version of the Branchline data transformation languag
 site_author: Eugene Hlyzov
 repo_name: ehlyzov/branchline
 repo_url: https://github.com/ehlyzov/branchline
-exclude_docs: |
-  benchmarks/jsonata/**
 
 theme:
   name: material
@@ -98,6 +96,8 @@ nav:
     - Latest: benchmarks/latest.md
     - Releases: benchmarks/releases/index.md
     - Release List: benchmarks/releases/list.md
+    - JSONata Benchmarks: benchmarks/jsonata.md
+    - JSONata Releases: benchmarks/jsonata/releases/index.md
 
 plugins:
   - search

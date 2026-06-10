@@ -26,6 +26,36 @@ on:
         required: false
         default: false
         type: boolean
+      jsonata_jmh_profile:
+        description: 'JSONata JMH profile'
+        required: false
+        default: 'representative-long'
+        type: choice
+        options:
+          - representative-long
+          - representative-smoke
+          - representative
+          - all
+      jsonata_case_ids:
+        description: 'Optional comma-separated JSONata case IDs; overrides jsonata_jmh_profile case selection'
+        required: false
+        type: string
+      jsonata_warmup_iterations:
+        description: 'Optional JSONata JMH warmup iterations override'
+        required: false
+        type: string
+      jsonata_iterations:
+        description: 'Optional JSONata JMH measurement iterations override'
+        required: false
+        type: string
+      jsonata_time_on_iteration:
+        description: 'Optional JSONata JMH time per measurement iteration override, for example 1s'
+        required: false
+        type: string
+      jsonata_forks:
+        description: 'Optional JSONata JMH forks override'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -65,6 +95,12 @@ jobs:
           DISPATCH_FULL_RELEASE: ${{ github.event.inputs.full_release }}
           DISPATCH_RUN_JMH: ${{ github.event.inputs.run_jmh }}
           DISPATCH_RUN_JSONATA: ${{ github.event.inputs.run_jsonata }}
+          DISPATCH_JSONATA_JMH_PROFILE: ${{ github.event.inputs.jsonata_jmh_profile }}
+          DISPATCH_JSONATA_CASE_IDS: ${{ github.event.inputs.jsonata_case_ids }}
+          DISPATCH_JSONATA_WARMUP_ITERATIONS: ${{ github.event.inputs.jsonata_warmup_iterations }}
+          DISPATCH_JSONATA_ITERATIONS: ${{ github.event.inputs.jsonata_iterations }}
+          DISPATCH_JSONATA_TIME_ON_ITERATION: ${{ github.event.inputs.jsonata_time_on_iteration }}
+          DISPATCH_JSONATA_FORKS: ${{ github.event.inputs.jsonata_forks }}
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
@@ -83,11 +119,13 @@ jobs:
             run_full_release="true"
             run_jmh="true"
             run_jsonata="false"
+            jsonata_jmh_profile="representative-long"
             ensure_release_exists="false"
           elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             tag="perf-${GITHUB_SHA::7}"
             run_full_release="false"
             run_jmh="true"
+            jsonata_jmh_profile="representative-long"
             if [[ "${HEAD_COMMIT_MESSAGE:-}" == *"+jsonata"* ]]; then
               run_jsonata="true"
             else
@@ -105,6 +143,7 @@ jobs:
             fr="${DISPATCH_FULL_RELEASE:-true}"
             rj="${DISPATCH_RUN_JMH:-true}"
             rjta="${DISPATCH_RUN_JSONATA:-false}"
+            jsonata_jmh_profile="${DISPATCH_JSONATA_JMH_PROFILE:-representative-long}"
 
             if [[ "${fr,,}" == "false" ]]; then run_full_release="false"; else run_full_release="true"; fi
             if [[ "${rj,,}" == "false" ]]; then run_jmh="false"; else run_jmh="true"; fi
@@ -119,6 +158,7 @@ jobs:
           echo "  RUN_FULL_RELEASE=$run_full_release"
           echo "  RUN_JMH=$run_jmh"
           echo "  RUN_JSONATA=$run_jsonata"
+          echo "  JSONATA_JMH_PROFILE=$jsonata_jmh_profile"
           echo "  ensure_release_exists=$ensure_release_exists"
           echo "  prerelease_flag=${prerelease_flag:-<none>}"
 
@@ -126,6 +166,12 @@ jobs:
           echo "RUN_FULL_RELEASE=$run_full_release" >> "$GITHUB_ENV"
           echo "RUN_JMH=$run_jmh" >> "$GITHUB_ENV"
           echo "RUN_JSONATA=$run_jsonata" >> "$GITHUB_ENV"
+          echo "JSONATA_JMH_PROFILE=$jsonata_jmh_profile" >> "$GITHUB_ENV"
+          echo "JSONATA_CASE_IDS=${DISPATCH_JSONATA_CASE_IDS:-}" >> "$GITHUB_ENV"
+          echo "JSONATA_WARMUP_ITERATIONS=${DISPATCH_JSONATA_WARMUP_ITERATIONS:-}" >> "$GITHUB_ENV"
+          echo "JSONATA_ITERATIONS=${DISPATCH_JSONATA_ITERATIONS:-}" >> "$GITHUB_ENV"
+          echo "JSONATA_TIME_ON_ITERATION=${DISPATCH_JSONATA_TIME_ON_ITERATION:-}" >> "$GITHUB_ENV"
+          echo "JSONATA_FORKS=${DISPATCH_JSONATA_FORKS:-}" >> "$GITHUB_ENV"
 
           if [[ "$ensure_release_exists" == "true" ]]; then
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -203,7 +249,29 @@ jobs:
         if: env.RUN_JSONATA == 'true'
         env:
           JSONATA_TEST_SUITE_ROOT: ${{ github.workspace }}/jsonata-benchmarks/src/jmh/resources/jsonata-test-suite
-        run: ./gradlew --no-daemon :jsonata-benchmarks:jmh
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--no-daemon :jsonata-benchmarks:jmh)
+          if [[ -n "${JSONATA_JMH_PROFILE:-}" ]]; then
+            args+=("-PjmhProfile=${JSONATA_JMH_PROFILE}")
+          fi
+          if [[ -n "${JSONATA_CASE_IDS:-}" ]]; then
+            args+=("-PjmhCaseIds=${JSONATA_CASE_IDS}")
+          fi
+          if [[ -n "${JSONATA_WARMUP_ITERATIONS:-}" ]]; then
+            args+=("-PjmhWarmupIterations=${JSONATA_WARMUP_ITERATIONS}")
+          fi
+          if [[ -n "${JSONATA_ITERATIONS:-}" ]]; then
+            args+=("-PjmhIterations=${JSONATA_ITERATIONS}")
+          fi
+          if [[ -n "${JSONATA_TIME_ON_ITERATION:-}" ]]; then
+            args+=("-PjmhTimeOnIteration=${JSONATA_TIME_ON_ITERATION}")
+          fi
+          if [[ -n "${JSONATA_FORKS:-}" ]]; then
+            args+=("-PjmhForks=${JSONATA_FORKS}")
+          fi
+          ./gradlew "${args[@]}"
 
       - name: Build JSONata summary
         if: env.RUN_JSONATA == 'true'

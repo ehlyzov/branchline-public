@@ -4,8 +4,12 @@ depends_on: []
 blocks: []
 supersedes: []
 superseded_by: []
-last_updated: 2026-06-10
+last_updated: 2026-06-11
 changelog:
+  - date: 2026-06-11
+    change: "Started B1-B5 representative expansion: added target cases, split string-concat semantics, introduced controlled long JMH profile, and repaired JSONata benchmark page publication."
+  - date: 2026-06-11
+    change: "Verified the local representative smoke run, string-concat expected-failure split, JSONata summary generation, and docsBuild before GitHub publication validation."
   - date: 2026-06-10
     change: "Completed benchmark hardening H1-H4: state-report JSON/CSV, summary state consumption, and credibility flags for non-comparable or implausible rows."
   - date: 2026-06-10
@@ -111,6 +115,59 @@ Remaining caveats:
 
 - VM fallback/execution-state observability is still not exposed by `VMExec`; this remains a future VM hardening task, not a blocker for resuming DX T9-T18.
 - One-iteration benchmark numbers remain smoke evidence. Public adoption claims still need longer controlled runs after the row-state guard.
+
+## B1-B5 representative comparison pass (2026-06-11)
+
+Scope:
+
+- B1: Added a dedicated plan at [Branchline JSONata Representative Benchmarks Plan](../planning/branchline-jsonata-representative-benchmarks-plan.md).
+- B2: Expanded the curated matrix with representative cases for nested mapping/filtering, lookup enrichment, object-shaped string construction, XML-ish JSON shape, and contract/error-like branches.
+- B3: Kept `string-concat/case000` as a JSONata-suite scalar baseline and marked Branchline rows as expected non-comparable; `string-object-construction` is the comparable Branchline object-output baseline.
+- B4: Added `-PjmhProfile=representative-long` and GitHub Actions inputs for profile, case IDs, warmup iterations, measurement iterations, iteration time, and forks.
+- B5: Repaired JSONata benchmark page publication by including JSONata release pages in MkDocs and copying latest JSONata CSV beside the overview page.
+
+Representative-long default cases:
+
+```
+api-envelope-shaping,
+nested-mapping-filtering,
+lookup-join-enrichment,
+string-object-construction,
+xml-ish-shape,
+contract-error-branches,
+contract-drift-projection,
+large-filter-map-aggregate,
+numeric-precision-invoice,
+performance/case001
+```
+
+Public comparison wording remains gated on fresh GitHub Actions artifacts from this representative profile.
+
+Local verification:
+
+```
+ruby -e 'require "yaml"; data=YAML.load_file("jsonata-benchmarks/src/jmh/resources/jsonata-case-matrix.yaml"); ids=data.fetch("cases").map { |c| c.fetch("id") }; abort "count #{ids.size}" unless ids.size == 32; puts "case matrix yaml ok: #{ids.size} cases"'
+./gradlew --no-daemon :jsonata-benchmarks:jmh -PjmhProfile=representative-smoke -PjmhWarmupIterations=1 -PjmhIterations=1
+./gradlew --no-daemon :cli:runBl --args "$PWD/.github/scripts/jsonata-report.bl --shared-file jmh=$PWD/jsonata-benchmarks/build/results/jmh/results.json --shared-file state=$PWD/jsonata-benchmarks/build/reports/jsonata-benchmarks/state-report.json --shared-format json --shared-key basename --write-output --write-output-dir $PWD/build/jsonata-benchmarks --output-format json-compact"
+./gradlew --no-daemon :jsonata-benchmarks:jmh -PjmhCaseIds=string-concat/case000,string-object-construction -PjmhWarmupIterations=1 -PjmhIterations=1
+./gradlew --no-daemon :cli:runBl --args "$PWD/.github/scripts/jsonata-report.bl --shared-file jmh=$PWD/jsonata-benchmarks/build/results/jmh/results.json --shared-file state=$PWD/jsonata-benchmarks/build/reports/jsonata-benchmarks/state-report.json --shared-format json --shared-key basename --write-output --write-output-dir $PWD/build/jsonata-benchmarks --output-format json-compact"
+./gradlew --no-daemon docsBuild
+```
+
+Result:
+
+- YAML parse passed with 32 cases.
+- Representative smoke JMH completed with `BUILD SUCCESSFUL`.
+- Summary generation completed with `BUILD SUCCESSFUL` and emitted `jsonata-summary.md` plus `jsonata-summary.csv`.
+- Branchline interpreter and VM rows for `string-concat/case000` are `expected_failure`, `comparable=false`, and excluded from throughput totals.
+- `string-object-construction` remains a valid comparable simple object-output string baseline across Kotlin, Branchline interpreter, Branchline VM, Dashjoin JSONata, and IBM JSONata.
+- `docsBuild` completed with `BUILD SUCCESSFUL` and processed `benchmarks/jsonata.md` plus `benchmarks/jsonata/releases/index.md`.
+
+GitHub-only validation still required:
+
+- `+jsonata` push should run `representative-long` by default.
+- GitHub Pages should publish top-level `benchmarks/jsonata/jsonata-summary.csv`.
+- GitHub Pages should publish generated JSONata release detail pages such as `benchmarks/jsonata/releases/perf-<sha>/`.
 
 ## G2 core product case expansion (2026-06-10)
 

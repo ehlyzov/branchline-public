@@ -4,10 +4,12 @@ depends_on: []
 blocks: []
 supersedes: ['planning/current-research-tasks']
 superseded_by: []
-last_updated: 2026-06-10
+last_updated: 2026-06-11
 changelog:
   - date: 2026-06-10
     change: "Completed Branchline DX T9-T18 after benchmark hardening; final playground/docs/test/contour verification passed."
+  - date: 2026-06-11
+    change: "Started representative JSONata benchmark expansion B1-B5 and public JSONata benchmark page link repair."
   - date: 2026-06-10
     change: "Closed Branchline DX T9/T16 and added the Playground Example Metadata development record."
   - date: 2026-06-10
@@ -178,6 +180,7 @@ This index is the canonical entry point for the /development knowledge base. All
 - [Runtime Optimizations](runtime/runtime-optimizations.md) -- hot path backlog.
 - [Conformance Suite](quality/conformance-suite.md) -- parity coverage expansion.
 - [JSONata Benchmarking](perf/jsonata-benchmarking.md) -- case matrix + validation.
+- [Branchline JSONata Representative Benchmarks Plan](planning/branchline-jsonata-representative-benchmarks-plan.md) -- B1-B5 plan for representative JSONata case expansion, string-concat split, controlled long JMH, and public comparison repair.
 - [Interpreter Performance Tasks](perf/interpreter-performance-tasks.md) -- perf task backlog.
 
 ### Implemented

@@ -83,6 +83,7 @@ jobs:
           index_path="docs/benchmarks/releases/index.md"
           list_path="docs/benchmarks/releases/list.md"
           jsonata_latest_path="docs/benchmarks/jsonata/latest.md"
+          jsonata_latest_csv_path="docs/benchmarks/jsonata/jsonata-summary.csv"
           jsonata_index_path="docs/benchmarks/jsonata/releases/index.md"
           jsonata_list_path="docs/benchmarks/jsonata/releases/list.md"
 
@@ -152,6 +153,9 @@ jobs:
 
               if [[ "$jsonata_latest_written" == "false" ]]; then
                 cp "$jsonata_out_path" "$jsonata_latest_path"
+                if [[ -f "${jsonata_assets_dir}/jsonata-summary.csv" ]]; then
+                  cp "${jsonata_assets_dir}/jsonata-summary.csv" "$jsonata_latest_csv_path"
+                fi
                 jsonata_latest_written=true
               fi
             fi

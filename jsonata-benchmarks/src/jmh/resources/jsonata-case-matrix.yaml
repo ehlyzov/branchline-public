@@ -88,12 +88,15 @@ cases:
                   country: input.shipping.country,
                   postalCode: input.shipping.postal,
               },
-              lines: MAP(input.items, (item) -> {
+              lines: [
+                  {
                   sku: item.sku,
                   qty: item.qty,
                   unitPrice: item.price,
                   lineTotal: item.qty * item.price,
-              }),
+                  }
+                  FOR EACH item IN input.items
+              ],
               totals: {
                   gross: gross,
                   discount: input.discount,
@@ -128,11 +131,14 @@ cases:
           LET eligible = FILTER(input.items, (item) -> item.active == true && item.score >= 80)
           LET weighted = MAP(eligible, (item) -> item.score * item.weight)
           OUTPUT {
-              eligible: MAP(eligible, (item) -> {
+              eligible: [
+                  {
                   id: item.id,
                   region: item.region,
                   weighted: item.score * item.weight,
-              }),
+                  }
+                  FOR EACH item IN eligible
+              ],
               summary: {
                   count: COUNT(eligible),
                   weightedTotal: SUM(weighted),
@@ -158,13 +164,16 @@ cases:
     branchlineProgram: |
       TRANSFORM ContractDriftProjection {
           OUTPUT {
-              records: MAP(input.accounts, (account) -> {
+              records: [
+                  {
                   id: account.id,
                   name: GET(account, "name", GET(account, "fullName", "unknown")),
                   email: GET(account, "email", ""),
                   plan: GET(account, "plan", "free"),
                   isActive: GET(account, "active", true),
-              }),
+                  }
+                  FOR EACH account IN input.accounts
+              ],
           }
       }
     kotlinEvalId: contract-drift-projection
@@ -183,7 +192,7 @@ cases:
           "total": $round($subtotal - $discountAmount + shipping, 2)
         }
       )
-    inputJson: '{"invoiceId":"inv-2026-0009","externalRef":"90071992547409931234","currency":"USD","discountRate":0.075,"shipping":4.99,"lines":[{"sku":"svc-basic","quantity":2,"unitPrice":19.95},{"sku":"usage","quantity":3,"unitPrice":4.2},{"sku":"support","quantity":1,"unitPrice":15.0}]}'
+    inputJson: '{"invoiceId":"inv-2026-0009","externalRef":"ref-90071992547409931234","currency":"USD","discountRate":0.075,"shipping":4.99,"lines":[{"sku":"svc-basic","quantity":2,"unitPrice":19.95},{"sku":"usage","quantity":3,"unitPrice":4.2},{"sku":"support","quantity":1,"unitPrice":15.0}]}'
     branchlineProgram: |
       TRANSFORM NumericPrecisionInvoice {
           LET subtotal = ROUND(SUM(MAP(input.lines, (line) -> line.quantity * line.unitPrice)), 2)
@@ -237,6 +246,178 @@ cases:
           }
       }
     kotlinEvalId: api-envelope-shaping
+  - id: nested-mapping-filtering
+    jsonataExpression: |
+      {
+        "customers": $map(customers, function($customer) {
+          {
+            "id": $customer.id,
+            "paidOrders": $map($customer.orders[status = "paid"], function($order) {
+              {
+                "id": $order.id,
+                "lines": $map($order.lines[qty > 0], function($line) {
+                  {
+                    "sku": $line.sku,
+                    "qty": $line.qty,
+                    "lineTotal": $line.qty * $line.price
+                  }
+                }),
+                "total": $sum($order.lines[qty > 0].(qty * price))
+              }
+            })
+          }
+        })
+      }
+    inputJson: '{"customers":[{"id":"cust-1","orders":[{"id":"ord-1","status":"paid","lines":[{"sku":"BK-001","qty":2,"price":12.5},{"sku":"PN-777","qty":1,"price":3.25}]},{"id":"ord-2","status":"draft","lines":[{"sku":"TB-030","qty":4,"price":2.0}]},{"id":"ord-4","status":"paid","lines":[{"sku":"TB-030","qty":2,"price":8.0},{"sku":"NT-010","qty":3,"price":1.75}]}]},{"id":"cust-2","orders":[{"id":"ord-3","status":"paid","lines":[{"sku":"BK-001","qty":1,"price":12.5},{"sku":"NT-010","qty":3,"price":1.75}]},{"id":"ord-5","status":"paid","lines":[{"sku":"PN-777","qty":2,"price":3.25},{"sku":"TB-030","qty":1,"price":8.0}]}]}]}'
+    branchlineProgram: |
+      TRANSFORM NestedMappingFiltering {
+          OUTPUT {
+              customers: [
+                  {
+                  id: customer.id,
+                  paidOrders: [
+                      {
+                      id: order.id,
+                      lines: [
+                          {
+                          sku: line.sku,
+                          qty: line.qty,
+                          lineTotal: line.qty * line.price,
+                          }
+                          FOR EACH line IN order.lines
+                          WHERE line.qty > 0
+                      ],
+                      total: SUM([line.qty * line.price FOR EACH line IN order.lines WHERE line.qty > 0]),
+                      }
+                      FOR EACH order IN customer.orders
+                      WHERE order.status == "paid"
+                  ],
+                  }
+                  FOR EACH customer IN input.customers
+              ],
+          }
+      }
+    kotlinEvalId: nested-mapping-filtering
+  - id: lookup-join-enrichment
+    jsonataExpression: |
+      {
+        "orderId": orderId,
+        "lines": $map(lines, function($line) {
+          {
+            "sku": $line.sku,
+            "title": $lookup(catalog, $line.sku).title,
+            "department": $lookup(catalog, $line.sku).department,
+            "available": $lookup(inventory, $line.sku) >= $line.qty,
+            "extended": $line.qty * $lookup(catalog, $line.sku).price
+          }
+        })
+      }
+    inputJson: '{"orderId":"ord-join-1","catalog":{"BK-001":{"title":"Branchline Handbook","department":"books","price":12.5},"PN-777":{"title":"Pipeline Notebook","department":"stationery","price":3.25},"TB-030":{"title":"Trace Board","department":"hardware","price":8.0}},"inventory":{"BK-001":3,"PN-777":0,"TB-030":10},"lines":[{"sku":"BK-001","qty":2},{"sku":"PN-777","qty":1},{"sku":"TB-030","qty":4}]}'
+    branchlineProgram: |
+      TRANSFORM LookupJoinEnrichment {
+          OUTPUT {
+              orderId: input.orderId,
+              lines: [
+                  {
+                  sku: line.sku,
+                  title: GET(GET(input.catalog, line.sku), "title"),
+                  department: GET(GET(input.catalog, line.sku), "department"),
+                  available: GET(input.inventory, line.sku) >= line.qty,
+                  extended: line.qty * GET(GET(input.catalog, line.sku), "price"),
+                  }
+                  FOR EACH line IN input.lines
+              ],
+          }
+      }
+    kotlinEvalId: lookup-join-enrichment
+  - id: string-object-construction
+    jsonataExpression: |
+      {
+        "id": id,
+        "slug": $lowercase($trim(firstName) & "-" & $trim(lastName)),
+        "display": $trim(firstName) & " " & $trim(lastName),
+        "tagLine": $join(tags, " / ")
+      }
+    inputJson: '{"id":"usr-42","firstName":" Ada ","lastName":" Lovelace ","tags":["math","programming","history"]}'
+    branchlineProgram: |
+      TRANSFORM StringObjectConstruction {
+          OUTPUT {
+              id: input.id,
+              slug: LOWER(TRIM(input.firstName) + "-" + TRIM(input.lastName)),
+              display: TRIM(input.firstName) + " " + TRIM(input.lastName),
+              tagLine: JOIN(input.tags, " / "),
+          }
+      }
+    kotlinEvalId: string-object-construction
+  - id: xml-ish-shape
+    jsonataExpression: |
+      {
+        "order": {
+          "id": order."@id",
+          "created": order."@created",
+          "customer": {
+            "id": order.customer."@id",
+            "name": order.customer."#text"
+          },
+          "lines": $map(order.line, function($line) {
+            {
+              "sku": $line."@sku",
+              "qty": $line."@qty",
+              "text": $line."#text"
+            }
+          })
+        }
+      }
+    inputJson: '{"order":{"@id":"ord-xml-1","@created":"2026-06-10","customer":{"@id":"cust-7","#text":"Ada Lovelace"},"line":[{"@sku":"BK-001","@qty":2,"#text":"Branchline Handbook"},{"@sku":"PN-777","@qty":1,"#text":"Pipeline Notebook"}]}}'
+    branchlineProgram: |
+      TRANSFORM XmlIshShape {
+          OUTPUT {
+              order: {
+                  id: GET(input.order, "@id"),
+                  created: GET(input.order, "@created"),
+                  customer: {
+                      id: GET(input.order.customer, "@id"),
+                      name: GET(input.order.customer, "#text"),
+                  },
+                  lines: [
+                      {
+                      sku: GET(line, "@sku"),
+                      qty: GET(line, "@qty"),
+                      text: GET(line, "#text"),
+                      }
+                      FOR EACH line IN input.order.line
+                  ],
+              },
+          }
+      }
+    kotlinEvalId: xml-ish-shape
+  - id: contract-error-branches
+    jsonataExpression: |
+      (
+        $errors := $exists(errors) ? errors : [];
+        {
+          "ok": status >= 200 and status < 300 and $count($errors) = 0,
+          "kind": status >= 500 ? "retryable" : (status >= 400 ? "client_error" : "ok"),
+          "message": $exists(error.message) ? error.message : "",
+          "payload": status = 200 ? data : null
+        }
+      )
+    inputJson: '{"status":409,"data":{"id":"obj-1","version":3},"error":{"message":"version conflict"},"errors":[{"code":"VERSION_CONFLICT","field":"version"}]}'
+    branchlineProgram: |
+      TRANSFORM ContractErrorBranches {
+          LET errors = GET(input, "errors", [])
+          OUTPUT {
+              ok: input.status >= 200 && input.status < 300 && COUNT(errors) == 0,
+              kind: CASE {
+                  WHEN input.status >= 500 THEN "retryable"
+                  WHEN input.status >= 400 THEN "client_error"
+                  ELSE "ok"
+              },
+              message: GET(GET(input, "error", {}), "message", ""),
+              payload: IF input.status == 200 THEN input.data ELSE null,
+          }
+      }
+    kotlinEvalId: contract-error-branches
   - id: jsonata-migration-pack-01
     jsonataExpression: |
       {
@@ -253,12 +434,15 @@ cases:
     branchlineProgram: |
       TRANSFORM JsonataMigrationPack01 {
           OUTPUT {
-              customers: MAP(input.customers, (customer) -> {
+              customers: [
+                  {
                   id: customer.id,
                   name: customer.name,
                   segment: GET(input.segments, customer.segmentCode),
                   country: GET(input.countries, customer.countryCode),
-              }),
+                  }
+                  FOR EACH customer IN input.customers
+              ],
           }
       }
     kotlinEvalId: jsonata-migration-pack-01
@@ -277,11 +461,14 @@ cases:
     branchlineProgram: |
       TRANSFORM JsonataMigrationPack02 {
           OUTPUT {
-              contacts: MAP(input.contacts, (contact) -> {
+              contacts: [
+                  {
                   id: contact.id,
                   email: LOWER(TRIM(contact.email)),
                   initials: UPPER(SUBSTRING(TRIM(contact.first), 0, 1) + SUBSTRING(TRIM(contact.last), 0, 1)),
-              }),
+                  }
+                  FOR EACH contact IN input.contacts
+              ],
           }
       }
     kotlinEvalId: jsonata-migration-pack-02
@@ -300,11 +487,14 @@ cases:
     branchlineProgram: |
       TRANSFORM JsonataMigrationPack03 {
           OUTPUT {
-              features: MAP(input.features, (feature) -> {
+              features: [
+                  {
                   key: feature.key,
                   enabled: feature.state == "on",
                   owner: GET(feature, "owner", "platform"),
-              }),
+                  }
+                  FOR EACH feature IN input.features
+              ],
           }
       }
     kotlinEvalId: jsonata-migration-pack-03
@@ -323,11 +513,14 @@ cases:
     branchlineProgram: |
       TRANSFORM JsonataMigrationPack04 {
           OUTPUT {
-              events: MAP(input.events, (event) -> {
+              events: [
+                  {
                   id: event.id,
                   day: SUBSTRING(event.timestamp, 0, 10),
                   label: event.type + ":" + SUBSTRING(event.timestamp, 11, 5),
-              }),
+                  }
+                  FOR EACH event IN input.events
+              ],
           }
       }
     kotlinEvalId: jsonata-migration-pack-04
@@ -346,11 +539,14 @@ cases:
     branchlineProgram: |
       TRANSFORM JsonataMigrationPack05 {
           OUTPUT {
-              articles: MAP(input.articles, (article) -> {
+              articles: [
+                  {
                   id: article.id,
                   title: article.title,
                   tagsCsv: JOIN(article.tags, ","),
-              }),
+                  }
+                  FOR EACH article IN input.articles
+              ],
           }
       }
     kotlinEvalId: jsonata-migration-pack-05
@@ -448,6 +644,9 @@ cases:
           OUTPUT { result: "foo" + "bar" };
       }
     kotlinEvalId: "string-concat/case000"
+    expectedFailures:
+      branchline-interpreter: "JSONata suite case returns scalar string; Branchline analog is object-wrapped. Use string-object-construction for comparable object-output baseline."
+      branchline-vm: "JSONata suite case returns scalar string; Branchline analog is object-wrapped. Use string-object-construction for comparable object-output baseline."
   - id: range-operator/case000
     branchlineProgram: |
       TRANSFORM RangeOperatorCase000 {

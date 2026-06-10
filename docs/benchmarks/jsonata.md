@@ -37,12 +37,17 @@ JSONata benchmark pages cover execution throughput for JSON-like transformations
 | Category | Planned case IDs | Product framing |
 | --- | --- | --- |
 | ETL and API mediation | `etl-order-normalization`, `api-envelope-shaping` | Common service-boundary JSON reshaping with defaults and nested output. |
-| Collection throughput | `large-filter-map-aggregate` | Filter, map, and aggregate over larger arrays. |
-| Contract-aware projection | `contract-drift-projection` | Stable output under optional or missing input fields. |
+| Nested mapping/filtering | `nested-mapping-filtering`, `large-filter-map-aggregate` | Repeated filtering and nested output construction over product-like arrays. |
+| Joins/lookups | `lookup-join-enrichment`, `jsonata-migration-pack-01` | Enrich records from object-key lookup tables. |
+| String/object construction | `string-object-construction`, `jsonata-migration-pack-02`, `jsonata-migration-pack-04`, `jsonata-migration-pack-05` | String cleanup, labels, slugs, CSV-like joins, and object-shaped public output. |
+| XML-ish JSON shape | `xml-ish-shape` | Attribute/text-key JSON that mirrors XML mapping without using Branchline-only XML runtime features. |
+| Contract/error branches | `contract-error-branches`, `contract-drift-projection` | Stable output under optional fields, status branches, and error payloads. |
 | Numeric safety | `numeric-precision-invoice` | Currency totals, discounts, and large identifiers with documented numeric equivalence. |
 | Migration examples | `jsonata-migration-pack-01..05` | Clear JSONata expressions with Branchline analogs and Kotlin evaluators. |
 
-The current matrix is still partly micro and JSONata-suite shaped. A missing external Dashjoin or IBM jar must be reported as unavailable, expected failures must remain visible, and semantic validation must be recorded before publishing speed claims for a case.
+The matrix still includes micro and JSONata-suite shaped rows. A missing external Dashjoin or IBM jar must be reported as unavailable, expected failures must remain visible, and semantic validation must be recorded before publishing speed claims for a case.
+
+`string-concat/case000` is retained as a JSONata-suite scalar baseline and is not used for Branchline speedup claims. Use `string-object-construction` for the comparable object-output string construction baseline.
 
 ## Run locally
 
@@ -51,6 +56,16 @@ DASHJOIN_REPO=path/to/dashjoin-jars \
 IBM_JSONATA_REPO=path/to/ibm-jars \
 ./gradlew :jsonata-benchmarks:jmh
 ```
+
+Representative long profile:
+
+```bash
+DASHJOIN_REPO=path/to/dashjoin-jars \
+IBM_JSONATA_REPO=path/to/ibm-jars \
+./gradlew :jsonata-benchmarks:jmh -PjmhProfile=representative-long
+```
+
+Override the selected cases or run length with `-PjmhCaseIds=...`, `-PjmhWarmupIterations=...`, `-PjmhIterations=...`, `-PjmhTimeOnIteration=...`, and `-PjmhForks=...`.
 
 ## Raw artifacts
 

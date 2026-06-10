@@ -42,6 +42,7 @@ latest_path="${docs_dir}/benchmarks/latest.md"
 index_path="${release_dir}/index.md"
 list_path="${release_dir}/list.md"
 jsonata_latest_path="${docs_dir}/benchmarks/jsonata/latest.md"
+jsonata_latest_csv_path="${docs_dir}/benchmarks/jsonata/jsonata-summary.csv"
 jsonata_index_path="${jsonata_release_dir}/index.md"
 jsonata_list_path="${jsonata_release_dir}/list.md"
 
@@ -116,6 +117,9 @@ while IFS= read -r release; do
 
   if [[ "$jsonata_latest_written" == "false" ]]; then
     cp "$jsonata_out_path" "$jsonata_latest_path"
+    if [[ -f "${jsonata_assets_dir}/jsonata-summary.csv" ]]; then
+      cp "${jsonata_assets_dir}/jsonata-summary.csv" "$jsonata_latest_csv_path"
+    fi
     jsonata_latest_written=true
   fi
 done < <(jq -r '.[] | select(.draft == false) | @base64' <<<"$releases")

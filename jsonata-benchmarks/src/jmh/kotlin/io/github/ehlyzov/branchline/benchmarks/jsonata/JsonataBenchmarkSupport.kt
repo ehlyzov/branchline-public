@@ -362,6 +362,11 @@ public object KotlinEvaluators {
         "contract-drift-projection" to ::evalContractDriftProjection,
         "numeric-precision-invoice" to ::evalNumericPrecisionInvoice,
         "api-envelope-shaping" to ::evalApiEnvelopeShaping,
+        "nested-mapping-filtering" to ::evalNestedMappingFiltering,
+        "lookup-join-enrichment" to ::evalLookupJoinEnrichment,
+        "string-object-construction" to ::evalStringObjectConstruction,
+        "xml-ish-shape" to ::evalXmlIshShape,
+        "contract-error-branches" to ::evalContractErrorBranches,
         "jsonata-migration-pack-01" to ::evalJsonataMigrationPack01,
         "jsonata-migration-pack-02" to ::evalJsonataMigrationPack02,
         "jsonata-migration-pack-03" to ::evalJsonataMigrationPack03,
@@ -750,6 +755,142 @@ private fun evalApiEnvelopeShaping(input: Any?): Any? {
             "primaryEmail" to primaryEmail?.let { readString(it, "address") },
         ),
         "errors" to (readList(root, "errors") ?: emptyList<Any?>()),
+    )
+}
+
+private fun evalNestedMappingFiltering(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val customers = readList(root, "customers") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(customers.size)
+    for (customerValue in customers) {
+        val customer = customerValue as? Map<*, *> ?: continue
+        val orders = readList(customer, "orders") ?: emptyList<Any?>()
+        val paidOrders = ArrayList<Map<String, Any?>>()
+        for (orderValue in orders) {
+            val order = orderValue as? Map<*, *> ?: continue
+            if (readString(order, "status") != "paid") continue
+            val sourceLines = readList(order, "lines") ?: emptyList<Any?>()
+            val lines = ArrayList<Map<String, Any?>>()
+            var total = 0.0
+            for (lineValue in sourceLines) {
+                val line = lineValue as? Map<*, *> ?: continue
+                val qty = readNumber(line, "qty") ?: continue
+                if (qty <= 0.0) continue
+                val price = readNumber(line, "price") ?: continue
+                val lineTotal = qty * price
+                total += lineTotal
+                lines.add(
+                    linkedMapOf(
+                        "sku" to readString(line, "sku"),
+                        "qty" to line["qty"],
+                        "lineTotal" to lineTotal,
+                    ),
+                )
+            }
+            paidOrders.add(
+                linkedMapOf(
+                    "id" to readString(order, "id"),
+                    "lines" to lines,
+                    "total" to total,
+                ),
+            )
+        }
+        out.add(
+            linkedMapOf(
+                "id" to readString(customer, "id"),
+                "paidOrders" to paidOrders,
+            ),
+        )
+    }
+    return linkedMapOf("customers" to out)
+}
+
+private fun evalLookupJoinEnrichment(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val catalog = readMap(root, "catalog") ?: return null
+    val inventory = readMap(root, "inventory") ?: return null
+    val lines = readList(root, "lines") ?: emptyList<Any?>()
+    val out = ArrayList<Map<String, Any?>>(lines.size)
+    for (lineValue in lines) {
+        val line = lineValue as? Map<*, *> ?: continue
+        val sku = readString(line, "sku") ?: continue
+        val product = catalog[sku] as? Map<*, *> ?: continue
+        val qty = readNumber(line, "qty") ?: 0.0
+        val price = readNumber(product, "price") ?: 0.0
+        val availableQty = readNumber(inventory[sku]) ?: 0.0
+        out.add(
+            linkedMapOf(
+                "sku" to sku,
+                "title" to readString(product, "title"),
+                "department" to readString(product, "department"),
+                "available" to (availableQty >= qty),
+                "extended" to qty * price,
+            ),
+        )
+    }
+    return linkedMapOf(
+        "orderId" to readString(root, "orderId"),
+        "lines" to out,
+    )
+}
+
+private fun evalStringObjectConstruction(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val first = readString(root, "firstName")?.trim() ?: ""
+    val last = readString(root, "lastName")?.trim() ?: ""
+    val tags = readList(root, "tags") ?: emptyList<Any?>()
+    return linkedMapOf(
+        "id" to readString(root, "id"),
+        "slug" to "$first-$last".lowercase(),
+        "display" to "$first $last",
+        "tagLine" to tags.joinToString(" / "),
+    )
+}
+
+private fun evalXmlIshShape(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val order = readMap(root, "order") ?: return null
+    val customer = readMap(order, "customer") ?: return null
+    val lines = readList(order, "line") ?: emptyList<Any?>()
+    val outLines = ArrayList<Map<String, Any?>>(lines.size)
+    for (lineValue in lines) {
+        val line = lineValue as? Map<*, *> ?: continue
+        outLines.add(
+            linkedMapOf(
+                "sku" to line["@sku"],
+                "qty" to line["@qty"],
+                "text" to line["#text"],
+            ),
+        )
+    }
+    return linkedMapOf(
+        "order" to linkedMapOf(
+            "id" to order["@id"],
+            "created" to order["@created"],
+            "customer" to linkedMapOf(
+                "id" to customer["@id"],
+                "name" to customer["#text"],
+            ),
+            "lines" to outLines,
+        ),
+    )
+}
+
+private fun evalContractErrorBranches(input: Any?): Any? {
+    val root = input as? Map<*, *> ?: return null
+    val status = readNumber(root, "status") ?: 0.0
+    val errors = readList(root, "errors") ?: emptyList<Any?>()
+    val error = readMap(root, "error")
+    val kind = when {
+        status >= 500.0 -> "retryable"
+        status >= 400.0 -> "client_error"
+        else -> "ok"
+    }
+    return linkedMapOf(
+        "ok" to (status >= 200.0 && status < 300.0 && errors.isEmpty()),
+        "kind" to kind,
+        "message" to (error?.let { readString(it, "message") } ?: ""),
+        "payload" to if (status == 200.0) root["data"] else null,
     )
 }
 

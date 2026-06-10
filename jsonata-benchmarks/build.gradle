@@ -103,7 +103,25 @@ def jmhForks = providers.gradleProperty("jmhForks").orNull
 def jmhProfilers = providers.gradleProperty("jmhProfilers").orNull
 def jmhCaseIds = providers.gradleProperty("jmhCaseIds").orNull
 def jmhIncludes = providers.gradleProperty("jmhIncludes").orNull
+def jmhProfile = providers.gradleProperty("jmhProfile").orNull
 def jsonataFullSuite = providers.gradleProperty("jsonataFullSuite").orNull
+def normalizedJmhProfile = jmhProfile == null ? "" : jmhProfile.trim()
+def representativeCaseIds = [
+    'api-envelope-shaping',
+    'nested-mapping-filtering',
+    'lookup-join-enrichment',
+    'string-object-construction',
+    'xml-ish-shape',
+    'contract-error-branches',
+    'contract-drift-projection',
+    'large-filter-map-aggregate',
+    'numeric-precision-invoice',
+    'performance/case001',
+]
+def representativeProfileNames = ['representative', 'representative-smoke', 'representative-long']
+if (normalizedJmhProfile && !(representativeProfileNames + ['all']).contains(normalizedJmhProfile)) {
+    throw new GradleException("Unknown jmhProfile '${normalizedJmhProfile}'. Supported: representative, representative-smoke, representative-long, all.")
+}
 def jmhProfilerList = jmhProfilers == null
     ? ['gc']
     : jmhProfilers.split(',').collect { it.trim() }.findAll { it }
@@ -114,13 +132,24 @@ def jmhIncludeList = jmhIncludes == null || jmhIncludes.trim().isEmpty()
         : ['io.github.ehlyzov.branchline.benchmarks.jsonata.CrossEngineBenchmark'])
     : jmhIncludes.split(',').collect { it.trim() }.findAll { it }
 def caseIdList = jmhCaseIds == null || jmhCaseIds.trim().isEmpty()
-    ? loadCaseIds(file("src/jmh/resources/jsonata-case-matrix.yaml"))
+    ? (representativeProfileNames.contains(normalizedJmhProfile)
+        ? representativeCaseIds
+        : loadCaseIds(file("src/jmh/resources/jsonata-case-matrix.yaml")))
     : jmhCaseIds.split(',').collect { it.trim() }.findAll { it }
 if (caseIdList.isEmpty()) {
     caseIdList = ['all']
 }
 def caseIdListProperty = objects.listProperty(String)
 caseIdListProperty.set(caseIdList)
+def defaultWarmupIterations = normalizedJmhProfile == 'representative-long' ? '5' : '1'
+def defaultWarmupTime = normalizedJmhProfile == 'representative-long' ? '1s' : '200ms'
+def defaultIterations = normalizedJmhProfile == 'representative-long' ? '10' : '1'
+def defaultTimeOnIteration = normalizedJmhProfile == 'representative-long' ? '1s' : '800ms'
+def defaultForks = normalizedJmhProfile == 'representative-long' ? '1' : '1'
+
+if (normalizedJmhProfile) {
+    logger.lifecycle("jsonata-benchmarks: jmhProfile=${normalizedJmhProfile}, cases=${caseIdList.join(',')}")
+}
 
 dependencies {
     implementation project(':interpreter')
@@ -143,11 +172,11 @@ jmh {
     benchmarkParameters = [
         caseId: caseIdListProperty,
     ]
-    warmupIterations = (jmhWarmupIterations ?: "1").toInteger()
-    warmup = jmhWarmupTime ?: '200ms'
-    iterations = (jmhIterations ?: "1").toInteger()
-    timeOnIteration = jmhTimeOnIteration ?: '800ms'
-    fork = (jmhForks ?: "1").toInteger()
+    warmupIterations = (jmhWarmupIterations ?: defaultWarmupIterations).toInteger()
+    warmup = jmhWarmupTime ?: defaultWarmupTime
+    iterations = (jmhIterations ?: defaultIterations).toInteger()
+    timeOnIteration = jmhTimeOnIteration ?: defaultTimeOnIteration
+    fork = (jmhForks ?: defaultForks).toInteger()
 }
 
 tasks.named('jmh', me.champeau.jmh.JMHTask).configure {
